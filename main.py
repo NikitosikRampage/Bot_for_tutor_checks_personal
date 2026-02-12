@@ -692,27 +692,27 @@ async def find_payment(message: Message):
         if session is not None:
             session.close()
 
+# ... весь твой код до конца ...
+
 async def main():
     print("БОТ ДЛЯ РЕПЕТИТОРОВ ЗАПУЩЕН")
 
+    await bot.delete_webhook(drop_pending_updates=True)
     import os
-    render_url = os.getenv("RENDER_EXTERNAL_HOSTNAME")  
-    if not render_url:
-        raise ValueError("RENDER_EXTERNAL_HOSTNAME не найден. Запускается не на Render?")
+    port = int(os.getenv("PORT", 10000))
+
+    render_hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+    if not render_hostname:
+        raise ValueError("RENDER_EXTERNAL_HOSTNAME не найден — запуск не на Render?")
 
     webhook_path = "/webhook"
-    webhook_url = f"https://{render_url}{webhook_path}"
+    webhook_url = f"https://{render_hostname}{webhook_path}"
 
-    await bot.delete_webhook(drop_pending_updates=True)
+    print(f"Устанавливаем webhook: {webhook_url}")
 
     await bot.set_webhook(url=webhook_url)
-
-    print(f"Webhook установлен на: {webhook_url}")
-
-    await dp.start_webhook(
-        webhook_path=webhook_path,
-        webhook_url=webhook_url,
-        skip_updates=True,
+    await dp.start_polling(
+        bot,
         drop_pending_updates=True,
     )
 
