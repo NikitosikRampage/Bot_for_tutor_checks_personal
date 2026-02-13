@@ -692,10 +692,15 @@ async def find_payment(message: Message):
         if session is not None:
             session.close()
 
-
 async def main():
     print("БОТ ДЛЯ РЕПЕТИТОРОВ ЗАПУЩЕН")
-    await dp.start_polling(bot)
+    await bot.delete_webhook(drop_pending_updates=True)
+    print("Webhook удалён (если был)")
+
+    await dp.start_polling(
+        bot,
+        drop_pending_updates=True,
+    )
 
 
 if __name__ == "__main__":
