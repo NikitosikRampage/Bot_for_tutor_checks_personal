@@ -279,7 +279,7 @@ async def show_pending(message: Message):
         for p in pend:
             txt = (
                 f"#{p.id}   ⏳\n\n"
-                f"Репетитор: {p.tutor_name}\n"
+                f"Репетитор: {get_display_tutor_name(p.tutor_name)}\n"
                 f"Ребёнок:  {p.student_name}\n"
                 f"Родитель:      {p.parent_name}\n"
                 f"Часы:      {p.hours}\n"
@@ -324,7 +324,7 @@ async def show_all_payments(message: Message):
 
         for tutor_name, tutor_payments in grouped.items():
             tutor_count = len(tutor_payments)
-            lines = [f"<b>Репетитор: {tutor_name}</b>  ({tutor_count} платежей)\n"]
+            lines = [f"<b>Репетитор: {get_display_tutor_name(tutor_name)}</b>  ({tutor_count} платежей)\n"]
 
             total_hours = 0.0
             total_to_pay = 0.0
@@ -415,7 +415,8 @@ async def show_weekly_reports(message: Message):
 
         total_week = 0.0
         for tutor_id, tutor_name, total_payment in tutor_payments:
-            response += f"Репетитор: {tutor_name}\nК выплате: {total_payment:,.2f} ₽\n\n"
+            display_name = get_display_tutor_name(tutor_name)
+            response += f"Репетитор: {display_name}\n<b>К выплате: {total_payment:,.2f} ₽</b>\n\n"
             total_week += total_payment
 
         response += f"<b>Всего к выплате за неделю: {total_week:,.2f} ₽</b>\n\n"
@@ -473,7 +474,7 @@ async def approve_payment(callback: CallbackQuery):
         new_caption = (
             f"✅ Платёж подтверждён\n\n"
             f"ID: #{payment.id}\n"
-            f"Репетитор: {payment.tutor_name}\n"
+            f"Репетитор: {get_display_tutor_name(payment.tutor_name)}\n"
             f"Ребёнок: {payment.student_name}\n"
             f"Родитель: {payment.parent_name}\n"
             f"Часы: {payment.hours}\n"
