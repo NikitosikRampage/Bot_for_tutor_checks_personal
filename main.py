@@ -21,6 +21,19 @@ from keyboards import (
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
+
+
+TUTOR_NAME_MAPPING = {
+    "qq": "Дмитрий Баев",
+    "Слава": "Святослав Кочмарев",
+    "Тимофей": "Тимофей Бородин",
+    "викиhow": "Вика Самойленко",
+    "Максим": "Макс Елдулов",
+}
+
+def get_display_tutor_name(raw_name: str) -> str:
+    return TUTOR_NAME_MAPPING.get(raw_name.strip(), raw_name.strip())
+
 class PaymentForm(StatesGroup):
     waiting_for_hours = State()
     waiting_for_names = State()
@@ -188,7 +201,7 @@ async def notify_admins_about_new_payment(payment_id: int):
 
         text = (
             f"Новый платёж #{p.id}\n\n"
-            f"Репетитор: {p.tutor_name}\n"
+            f"Репетитор: {get_display_tutor_name(p.tutor_name)}\n"
             f"Ребёнок:  {p.student_name}\n"
             f"Родитель:      {p.parent_name}\n"
             f"Часы:      {p.hours}\n"
@@ -304,7 +317,8 @@ async def show_all_payments(message: Message):
         from collections import defaultdict
         grouped = defaultdict(list)
         for p in payments:
-            grouped[p.tutor_name].append(p)
+            display_name = get_display_tutor_name(p.tutor_name)
+            grouped[display_name].append(p)
 
         total_payments = len(payments)
 
