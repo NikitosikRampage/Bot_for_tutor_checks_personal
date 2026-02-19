@@ -368,7 +368,8 @@ async def show_all_payments(message: Message):
 
                 line = (
                     f"#{local_num} {st} • {p.date.strftime('%d.%m.%y %H:%M')}\n"
-                    f"{p.parent_name}/{p.student_name}/{p.hours:.2f} ч\n"
+                    f"{p.parent_name}/{p.student_name}\n"
+                    f"{p.hours:.2f} ч\n"
                     f"{p.tutor_rate:.0f} ₽ \n"
                 )
                 lines.append(line)
