@@ -15,7 +15,9 @@ from config import Config, ADMIN_IDS, BOT_TOKEN
 from database import Payment, get_session, get_week_start_date, get_week_end_date
 from keyboards import (
     get_main_keyboard, get_cancel_keyboard, get_admin_keyboard,
-    get_pending_actions_keyboard, get_approved_actions_keyboard, get_week_delete_keyboard, get_delete_confirm_keyboard
+    get_pending_actions_keyboard, get_approved_actions_keyboard,
+    get_week_delete_keyboard, get_delete_confirm_keyboard,
+    get_templates_menu_keyboard, get_template_selection_keyboard
 )
 
 
@@ -25,6 +27,17 @@ from yadisk import YaDisk
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
+tutor_templates = {}
+
+
+class TemplateForm(StatesGroup):
+    waiting_for_action = State()
+    waiting_for_parent = State()
+    waiting_for_student = State()
+    waiting_for_rate = State()
+    waiting_for_template_select = State()
+    waiting_for_hours = State()
+    waiting_for_receipt = State()
 
 
 TUTOR_NAME_MAPPING = {
@@ -47,7 +60,6 @@ class PaymentForm(StatesGroup):
 
 class AdminForm(StatesGroup):
     waiting_for_delete_confirm = State()
-
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
@@ -263,6 +275,68 @@ async def show_my_payments(message: Message):
         if session is not None:
             session.close()
 
+
+@dp.message(F.text == "Шаблоны")
+async def show_templates_menu(message: Message, state: FSMContext):
+    if Config.is_admin(message.from_user.id):
+        await message.answer("Доступно только репетиторам")
+        return
+
+    await state.set_state(TemplateForm.waiting_for_action)
+    await message.answer(
+        "Меню шаблонов учеников:",
+        reply_markup=get_templates_menu_keyboard()  # ← вызов из keyboards.py
+    )
+
+
+@dp.message(TemplateForm.waiting_for_action)
+async def process_template_action(message: Message, state: FSMContext):
+    action = message.text.strip()
+
+    if action == "Отмена":
+        await state.clear()
+        await message.answer("Отменено", reply_markup=get_main_keyboard())
+        return
+
+    tutor_id = message.from_user.id
+    if tutor_id not in tutor_templates:
+        tutor_templates[tutor_id] = []
+
+    if action == "Создать шаблон":
+        await state.set_state(TemplateForm.waiting_for_parent)
+        await message.answer(
+            "Шаг 1/3 • Имя мамы (пример: Анна)",
+            reply_markup=get_cancel_keyboard()
+        )
+    elif action == "Выбрать шаблон":
+        templates = tutor_templates[tutor_id]
+        if not templates:
+            await message.answer("У вас нет сохранённых шаблонов. Создайте новый.")
+            await state.clear()
+            await message.answer("Меню:", reply_markup=get_main_keyboard())
+            return
+
+        keyboard = get_template_selection_keyboard(templates, action="select")
+        await state.set_state(TemplateForm.waiting_for_template_select)
+        await state.update_data(template_action="select")
+        await message.answer("Выберите шаблон для добавления платежа:", reply_markup=keyboard)
+    elif action == "Удалить шаблон":
+        templates = tutor_templates[tutor_id]
+        if not templates:
+            await message.answer("У вас нет шаблонов для удаления.")
+            await state.clear()
+            await message.answer("Меню:", reply_markup=get_main_keyboard())
+            return
+
+        keyboard = get_template_selection_keyboard(templates, action="delete")
+        await state.set_state(TemplateForm.waiting_for_template_select)
+        await state.update_data(template_action="delete")
+        await message.answer("Выберите шаблон для удаления:", reply_markup=keyboard)
+    else:
+        await message.answer("Выберите действие из меню")
+
+
+
 @dp.message(F.text == "Ожидают проверки")
 @dp.message(Command("pending"))
 async def show_pending(message: Message):
@@ -298,6 +372,7 @@ async def show_pending(message: Message):
     finally:
         if session is not None:
             session.close()
+
 
 
 @dp.message(F.text == "Все платежи")
