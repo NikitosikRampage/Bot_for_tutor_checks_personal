@@ -334,7 +334,7 @@ async def show_all_payments(message: Message):
             for local_num, p in enumerate(tutor_payments, 1):
                 if p.receipt_file_id:
                     caption = (
-                        f"#{local_num} • {p.date.strftime('%d.%m.%y %H:%M')}\n"
+                        f"#{local_num} 🧾 • {p.date.strftime('%d.%m.%y %H:%M')}\n"
                         f"{p.parent_name}/{p.student_name}\n"
                         f"{p.tutor_rate:.0f} ₽\n"
                     )
@@ -374,7 +374,7 @@ async def show_all_payments(message: Message):
                 )
                 lines.append(line)
 
-            lines.append(f"<b>Итого: </b>{total_to_pay:,.0f} ₽ к выплате\n"
+            lines.append(f"<b>💰 Итого: {total_to_pay:,.0f} ₽ к выплате</b>"
                          f"───────────────\n")
             text = "───────────────\n".join(lines)
 
