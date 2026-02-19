@@ -720,9 +720,6 @@ async def find_payment(message: Message):
 
 async def main():
     print("БОТ ДЛЯ РЕПЕТИТОРОВ ЗАПУЩЕН")
-    await bot.delete_webhook(drop_pending_updates=True)
-    print("Webhook удалён (если был)")
-
     await dp.start_polling(
         bot,
         drop_pending_updates=True,
