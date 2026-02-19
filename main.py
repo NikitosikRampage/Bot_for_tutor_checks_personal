@@ -5,18 +5,22 @@ from datetime import timedelta
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, ContentType
-from aiogram.types import InputMediaPhoto, InputMediaDocument, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from sqlalchemy import func
 
 from config import Config, ADMIN_IDS, BOT_TOKEN
-from database import Payment, WeeklyReport, get_session, get_week_start_date, get_week_end_date
+from database import Payment, get_session, get_week_start_date, get_week_end_date
 from keyboards import (
     get_main_keyboard, get_cancel_keyboard, get_admin_keyboard,
     get_pending_actions_keyboard, get_approved_actions_keyboard, get_week_delete_keyboard, get_delete_confirm_keyboard
 )
+
+
+import yadisk
+from yadisk import YaDisk
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -26,7 +30,7 @@ dp = Dispatcher(storage=MemoryStorage())
 TUTOR_NAME_MAPPING = {
     "qq": "Дмитрий Баев",
     "Слава": "Святослав Кочмарев",
-    "Тимофей": "Тимофей Бородин",
+    "тимк": "Тимофей Бородин",
     "викиhow": "Вика Самойленко",
     "Максим": "Макс Елдулов",
 }
@@ -285,10 +289,10 @@ async def show_pending(message: Message):
                 f"Часы:      {p.hours}\n"
                 f"Ставка:    {p.tutor_rate} ₽"
             )
-            await (bot.send_photo if p.receipt_type == "photo" else bot.send_document)(
-                message.chat.id, p.receipt_file_id, caption=txt,
+            await ((bot.send_photo if p.receipt_type == "photo" else bot.send_document)
+                (message.chat.id, p.receipt_file_id, caption=txt,
                 reply_markup=get_pending_actions_keyboard(p.id)
-            )
+            ))
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
     finally:
@@ -320,8 +324,6 @@ async def show_all_payments(message: Message):
             display_name = get_display_tutor_name(p.tutor_name)
             grouped[display_name].append(p)
 
-        total_payments = len(payments)
-
         for tutor_name, tutor_payments in grouped.items():
             tutor_count = len(tutor_payments)
             lines = [f"<b>Репетитор: {get_display_tutor_name(tutor_name)}</b>  ({tutor_count} платежей)\n"]
@@ -332,9 +334,9 @@ async def show_all_payments(message: Message):
             for local_num, p in enumerate(tutor_payments, 1):
                 if p.receipt_file_id:
                     caption = (
-                        f"#{local_num} • {p.date.strftime('%d.%m.%y %H:%M')} • "
-                        f"Р: {p.parent_name} / У: {p.student_name} • "
-                        f" {p.tutor_rate:.0f} ₽"
+                        f"#{local_num} • {p.date.strftime('%d.%m.%y %H:%M')}\n"
+                        f"{p.parent_name}/{p.student_name}\n"
+                        f"{p.tutor_rate:.0f} ₽\n"
                     )
 
                     markup = InlineKeyboardMarkup(inline_keyboard=[[
@@ -365,8 +367,8 @@ async def show_all_payments(message: Message):
                 total_to_pay += amount
 
                 line = (
-                    f"#{local_num} {st} • {p.date.strftime('%d.%m.%y %H:%M')} • "
-                    f"{p.parent_name} / {p.student_name} • {p.hours:.2f} ч • "
+                    f"#{local_num} {st} • {p.date.strftime('%d.%m.%y %H:%M')}\n"
+                    f"{p.parent_name}/{p.student_name}/{p.hours:.2f} ч\n"
                     f"{p.tutor_rate:.0f} ₽ \n"
                 )
                 lines.append(line)
@@ -375,7 +377,7 @@ async def show_all_payments(message: Message):
             text = "\n".join(lines)
 
             await message.answer(text, parse_mode="HTML")
-            await message.answer("─" * 10)
+            await message.answer("─" * 15)
 
     except Exception as e:
         await message.answer(f"Ошибка: {str(e)}")
@@ -493,15 +495,14 @@ async def approve_payment(callback: CallbackQuery):
 
         if payment.receipt_file_id:
             try:
-                from yadisk import YaDisk
                 y = YaDisk(token=Config.YANDEX_DISK_TOKEN)
 
                 file_info = await bot.get_file(payment.receipt_file_id)
                 file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
 
                 date_part = payment.date.strftime("%d.%m.%Y")
-
-                filename = f"{date_part}"
+                tutor_display = get_display_tutor_name(payment.tutor_name)
+                filename = f"{date_part}, {tutor_display}, {payment.parent_name} — {payment.student_name}"
                 if payment.receipt_type == "photo":
                     filename += ".jpg"
                 else:
@@ -513,17 +514,26 @@ async def approve_payment(callback: CallbackQuery):
                 disk_path = f"{target_folder}/{filename}"
 
                 for folder in [base_folder, target_folder]:
-                    try:
-                        y.mkdir(folder, exist_ok=True)
-                    except Exception as mkdir_err:
-                        print(f"Не удалось создать папку {folder}: {mkdir_err}")
-
+                    if not y.exists(folder):
+                        y.mkdir(folder)
+                        print(f"Создана папка: {folder}")
                 y.upload_url(file_url, disk_path, overwrite=True)
 
                 print(f"Успешно загружен чек #{payment.id} → {disk_path}")
 
+            except yadisk.exceptions.PathExistsError:
+                print(f"Путь уже существует, пропускаем создание: {disk_path}")
+                try:
+                    y.upload_url(file_url, disk_path, overwrite=True)
+                    print(f"Файл перезаписан (overwrite): {disk_path}")
+                except Exception as upload_err:
+                    print(f"Не удалось перезаписать файл {disk_path}: {str(upload_err)}")
+
+            except yadisk.exceptions.UnauthorizedError:
+                print("Ошибка 401: Неверный или отозванный токен Яндекс.Диска")
+
             except Exception as exp_err:
-                print(f"Ошибка экспорта чека #{payment.id}: {str(exp_err)}")
+                print(f"Общая ошибка экспорта чека #{payment.id}: {str(exp_err)}")
 
 
     except Exception as e:
