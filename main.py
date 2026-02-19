@@ -374,7 +374,7 @@ async def show_all_payments(message: Message):
                 )
                 lines.append(line)
 
-            lines.append(f"<b>💰 Итого: {total_to_pay:,.0f} ₽ к выплате</b>"
+            lines.append(f"<b>💰 Итого: {total_to_pay:,.0f} ₽ к выплате</b>\n"
                          f"───────────────\n")
             text = "───────────────\n".join(lines)
 
