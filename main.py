@@ -16,8 +16,7 @@ from database import Payment, get_session, get_week_start_date, get_week_end_dat
 from keyboards import (
     get_main_keyboard, get_cancel_keyboard, get_admin_keyboard,
     get_pending_actions_keyboard, get_approved_actions_keyboard,
-    get_week_delete_keyboard, get_delete_confirm_keyboard,
-    get_templates_menu_keyboard, get_template_selection_keyboard
+    get_week_delete_keyboard, get_delete_confirm_keyboard
 )
 
 
@@ -85,7 +84,7 @@ async def start_add_payment(message: Message, state: FSMContext):
         "Шаг 1/4 • Часы\nПример: 1.5, 2, 0.75",
         reply_markup=get_cancel_keyboard()
     )
-    
+
 
 
 @dp.message(F.text == "Отмена")
