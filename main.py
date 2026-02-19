@@ -374,11 +374,10 @@ async def show_all_payments(message: Message):
                 )
                 lines.append(line)
 
-            lines.append(f"\n<b>Итого: </b>{total_to_pay:,.0f} ₽ к выплате")
-            text = "\n".join(lines)
+            lines.append(f"\n<b>Итого: </b>{total_to_pay:,.0f} ₽ к выплате\n")
+            text = "───────────────\n".join(lines)
 
             await message.answer(text, parse_mode="HTML")
-            await message.answer("─" * 15)
 
     except Exception as e:
         await message.answer(f"Ошибка: {str(e)}")
