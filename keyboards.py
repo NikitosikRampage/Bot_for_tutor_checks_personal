@@ -11,31 +11,17 @@ def get_main_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Добавить оплату")],
-            [KeyboardButton(text="Шаблоны")],
             [KeyboardButton(text="Мои платежи")],
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=False
-    )
-
-
-def get_templates_menu_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Создать шаблон")],
-            [KeyboardButton(text="Мои шаблоны")],
-            [KeyboardButton(text="Удалить шаблон")],
-            [KeyboardButton(text="Назад")],
         ],
         resize_keyboard=True
     )
-
 
 def get_cancel_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Отмена")]],
         resize_keyboard=True
     )
+
 
 def get_admin_keyboard():
     return ReplyKeyboardMarkup(

@@ -13,11 +13,10 @@ from sqlalchemy import func
 
 from config import Config, ADMIN_IDS, BOT_TOKEN
 from database import Payment, get_session, get_week_start_date, get_week_end_date
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from keyboards import (
     get_main_keyboard, get_cancel_keyboard, get_admin_keyboard,
     get_pending_actions_keyboard, get_approved_actions_keyboard,
-    get_week_delete_keyboard, get_delete_confirm_keyboard, get_templates_menu_keyboard
+    get_week_delete_keyboard, get_delete_confirm_keyboard
 )
 
 
@@ -26,15 +25,6 @@ from yadisk import YaDisk
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
-
-tutor_templates: dict[int, dict[str, dict]] = {}
-
-
-class TemplateStates(StatesGroup):
-    name        = State()
-    hours       = State()
-    names       = State()
-    rate        = State()
 
 
 TUTOR_NAME_MAPPING = {
@@ -241,191 +231,6 @@ async def notify_admins_about_new_payment(payment_id: int):
     finally:
         if session is not None:
             session.close()
-
-
-# ─── СОЗДАТЬ ШАБЛОН ───────────────────────────────────────────────────────────
-
-@dp.message(F.text == "Создать шаблон")
-async def start_create_template(message: Message, state: FSMContext):
-    if Config.is_admin(message.from_user.id):
-        await message.answer("Админам недоступно")
-        return
-    await state.set_state(TemplateStates.name)
-    await message.answer(
-        "Название шаблона (например: Матвей 5 класс, Аня мат.анализ)",
-        reply_markup=get_cancel_keyboard()
-    )
-
-
-@dp.message(TemplateStates.name)
-async def process_template_name(message: Message, state: FSMContext):
-    name = message.text.strip()
-    if not name or len(name) > 60:
-        await message.answer("Название от 1 до 60 символов")
-        return
-
-    # Проверяем, нет ли уже такого названия у этого репетитора
-    tutor_id = message.from_user.id
-    if tutor_id in tutor_templates and name in tutor_templates[tutor_id]:
-        await message.answer("Шаблон с таким названием уже существует. Выберите другое.")
-        return
-
-    await state.update_data(template_name=name)
-    await state.set_state(TemplateStates.hours)
-    await message.answer("Количество часов (по умолчанию):")
-
-
-@dp.message(TemplateStates.hours)
-async def process_template_hours(message: Message, state: FSMContext):
-    try:
-        hours = float(message.text.replace(',', '.'))
-        if hours <= 0 or hours > 24:
-            await message.answer("Часы от 0.1 до 24")
-            return
-        await state.update_data(hours=hours)
-        await state.set_state(TemplateStates.names)
-        await message.answer("Имя родителя и ученика через пробел\nПример: Ольга Артём")
-    except ValueError:
-        await message.answer("Введите число")
-
-
-@dp.message(TemplateStates.names)
-async def process_template_names(message: Message, state: FSMContext):
-    parts = message.text.strip().split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer("Имя родителя и ученика через пробел")
-        return
-    parent = parts[0].strip()
-    student = ' '.join(parts[1:]).strip()
-    if len(parent) < 2 or len(student) < 2:
-        await message.answer("Имена слишком короткие")
-        return
-    await state.update_data(parent_name=parent, student_name=student)
-    await state.set_state(TemplateStates.rate)
-    await message.answer("Ставка за час (руб):")
-
-
-@dp.message(TemplateStates.rate)
-async def process_template_rate(message: Message, state: FSMContext):
-    try:
-        rate = float(message.text.replace(',', '.'))
-        if rate <= 0:
-            await message.answer("Ставка > 0")
-            return
-
-        data = await state.get_data()
-        tutor_id = message.from_user.id
-
-        # Инициализируем словарь для пользователя, если его ещё нет
-        if tutor_id not in tutor_templates:
-            tutor_templates[tutor_id] = {}
-
-        tutor_templates[tutor_id][data['template_name']] = {
-            "hours": data['hours'],
-            "parent_name": data['parent_name'],
-            "student_name": data['student_name'],
-            "tutor_rate": rate
-        }
-
-        await message.answer(
-            f"Шаблон «{data['template_name']}» сохранён!\n"
-            f"{data['hours']} ч • {data['parent_name']} {data['student_name']} • {rate} ₽/ч",
-            reply_markup=get_templates_menu_keyboard()
-        )
-        await state.clear()
-
-    except ValueError:
-        await message.answer("Введите число")
-    except Exception as e:
-        await message.answer(f"Ошибка: {e}")
-
-
-# ─── ПОКАЗАТЬ / ВЫБРАТЬ ШАБЛОНЫ ──────────────────────────────────────────────
-
-@dp.message(F.text.in_({"Мои шаблоны", "Выбрать шаблон"}))
-async def show_my_templates(message: Message):
-    tutor_id = message.from_user.id
-    if tutor_id not in tutor_templates or not tutor_templates[tutor_id]:
-        await message.answer("У вас пока нет шаблонов.", reply_markup=get_templates_menu_keyboard())
-        return
-
-    builder = InlineKeyboardBuilder()
-    text = "Ваши шаблоны:\n\n"
-
-    for name, tpl in sorted(tutor_templates[tutor_id].items()):
-        text += f"• {name}\n  {tpl['hours']} ч • {tpl['parent_name']} {tpl['student_name']} • {tpl['tutor_rate']} ₽\n\n"
-        builder.row(InlineKeyboardButton(
-            text=f"Использовать {name}",
-            callback_data=f"use_tpl_{name}"
-        ))
-
-    await message.answer(text, reply_markup=builder.as_markup())
-
-
-@dp.callback_query(F.data.startswith("use_tpl_"))
-async def use_template(callback: CallbackQuery, state: FSMContext):
-    tutor_id = callback.from_user.id
-    template_name = callback.data.removeprefix("use_tpl_")
-
-    if tutor_id not in tutor_templates or template_name not in tutor_templates[tutor_id]:
-        await callback.answer("Шаблон не найден", show_alert=True)
-        return
-
-    tpl = tutor_templates[tutor_id][template_name]
-
-    await state.update_data(
-        hours=tpl["hours"],
-        parent_name=tpl["parent_name"],
-        student_name=tpl["student_name"],
-        tutor_rate=tpl["tutor_rate"]
-    )
-    await state.set_state(PaymentForm.waiting_for_receipt)
-
-    await callback.message.answer(
-        f"Выбран шаблон «{template_name}»\n\n"
-        f"Ребёнок: {tpl['student_name']}\n"
-        f"Родитель: {tpl['parent_name']}\n"
-        f"Часы: {tpl['hours']}\n"
-        f"Ставка: {tpl['tutor_rate']} ₽\n\n"
-        "Отправьте чек (фото или документ)",
-        reply_markup=get_cancel_keyboard()
-    )
-    await callback.answer()
-
-
-# ─── УДАЛИТЬ ШАБЛОН ───────────────────────────────────────────────────────────
-
-@dp.message(F.text == "Удалить шаблон")
-async def start_delete_template(message: Message):
-    tutor_id = message.from_user.id
-    if tutor_id not in tutor_templates or not tutor_templates[tutor_id]:
-        await message.answer("Нет шаблонов для удаления", reply_markup=get_templates_menu_keyboard())
-        return
-
-    builder = InlineKeyboardBuilder()
-    for name in sorted(tutor_templates[tutor_id].keys()):
-        builder.row(InlineKeyboardButton(
-            text=f"Удалить «{name}»",
-            callback_data=f"del_tpl_{name}"
-        ))
-
-    await message.answer("Выберите шаблон для удаления:", reply_markup=builder.as_markup())
-
-
-@dp.callback_query(F.data.startswith("del_tpl_"))
-async def delete_template(callback: CallbackQuery):
-    tutor_id = callback.from_user.id
-    template_name = callback.data.removeprefix("del_tpl_")
-
-    if tutor_id in tutor_templates and template_name in tutor_templates[tutor_id]:
-        del tutor_templates[tutor_id][template_name]
-        # Если у пользователя больше нет шаблонов — можно удалить ключ, но необязательно
-        if not tutor_templates[tutor_id]:
-            del tutor_templates[tutor_id]
-        await callback.message.edit_text(f"Шаблон «{template_name}» удалён.")
-        await callback.answer("Удалено")
-    else:
-        await callback.answer("Шаблон не найден", show_alert=True)
 
 
 @dp.message(F.text == "Мои платежи")
