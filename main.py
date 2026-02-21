@@ -140,8 +140,7 @@ async def process_template_rate(message: Message, state: FSMContext):
 
         data = await state.get_data()
 
-        # Формируем имя шаблона по заданному формату (используем rate as float, not int)
-        template_name = f"{data['parent_name']}/{data['student_name']}/{rate}/{data['hours']}"
+        template_name = f"👩‍🏫{data['parent_name']}/{data['student_name']} | 💰{rate}₽ | ⏰{data['hours']}ч"
 
         tutor_id = message.from_user.id
         if tutor_id not in tutor_templates:
@@ -171,7 +170,7 @@ async def process_template_rate(message: Message, state: FSMContext):
 async def show_my_templates(message: Message):
     tutor_id = message.from_user.id
     if tutor_id not in tutor_templates or not tutor_templates[tutor_id]:
-        await message.answer("У вас пока нет шаблонов", reply_markup=get_samples_keyboard())
+        await message.answer("У вас пока нет шаблонов", reply_markup=get_cancel_keyboard())
         return
 
     builder = InlineKeyboardBuilder()
@@ -210,7 +209,7 @@ async def show_my_templates(message: Message):
         async def delete_template_menu(message: Message):
             tutor_id = message.from_user.id
             if tutor_id not in tutor_templates or not tutor_templates[tutor_id]:
-                await message.answer("У вас нет шаблонов", reply_markup=get_samples_keyboard())
+                await message.answer("У вас нет шаблонов", reply_markup=get_cancel_keyboard())
                 return
 
             builder = InlineKeyboardBuilder()
