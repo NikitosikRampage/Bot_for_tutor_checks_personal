@@ -11,10 +11,23 @@ def get_main_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Добавить оплату")],
+            [KeyboardButton(text="Шаблоны")],
             [KeyboardButton(text="Мои платежи")],
         ],
         resize_keyboard=True
     )
+
+def get_samples_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Создать шаблон")],
+            [KeyboardButton(text="Мои шаблоны")],
+            [KeyboardButton(text="Удалить шаблон")],
+            [KeyboardButton(text="Вернуться в меню")],
+             ],
+        resize_keyboard=True
+    )
+
 
 def get_cancel_keyboard():
     return ReplyKeyboardMarkup(
