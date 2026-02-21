@@ -139,8 +139,7 @@ async def process_template_rate(message: Message, state: FSMContext):
             return
 
         data = await state.get_data()
-
-        template_name = f"👩‍🏫{data['parent_name']}/{data['student_name']} | 💰{rate}₽ | ⏰{data['hours']}ч"
+        template_name = f"👩‍🏫 {data['parent_name']}/{data['student_name']} | 💰{rate}₽ | ⏰{data['hours']}ч"
 
         tutor_id = message.from_user.id
         if tutor_id not in tutor_templates:
@@ -157,14 +156,18 @@ async def process_template_rate(message: Message, state: FSMContext):
             "student_name": data["student_name"],
             "tutor_rate": rate
         }
+
         await message.answer(
-            f"Шаблон создан: {template_name}",
+            f"Шаблон успешно создан:\n{template_name}",
             reply_markup=get_samples_keyboard()
         )
         await state.clear()
 
     except ValueError:
         await message.answer("Введите корректное число")
+    except Exception as e:
+        await message.answer(f"Ошибка при создании шаблона: {e}")
+        await state.clear()
 
 @dp.message(F.text == "Мои шаблоны")
 async def show_my_templates(message: Message):
@@ -211,14 +214,14 @@ async def show_my_templates(message: Message):
 
             if tutor_id not in tutor_templates or not tutor_templates[tutor_id]:
                 await message.answer(
-                    "У вас пока нет созданных шаблонов.",
+                    "У вас пока нет созданных шаблонов для удаления.",
                     reply_markup=get_cancel_keyboard()  # только "Отмена"
                 )
                 return
 
             builder = InlineKeyboardBuilder()
-            for name in sorted(tutor_templates[tutor_id].keys()):
-                builder.add(
+            for name in sorted(tutor_templates[tutor_id]):
+                builder.row(
                     InlineKeyboardButton(
                         text=name,
                         callback_data=f"del_{name}"
@@ -245,10 +248,10 @@ async def show_my_templates(message: Message):
                 )
                 await callback.message.answer(
                     "Что дальше?",
-                    reply_markup=get_samples_keyboard()  # возврат в меню шаблонов
+                    reply_markup=get_samples_keyboard()
                 )
             else:
-                await callback.answer("Шаблон не найден", show_alert=True)
+                await callback.answer("Шаблон не найден или уже удалён", show_alert=True)
 
             await callback.answer()
             
@@ -264,10 +267,15 @@ async def start_add_payment(message: Message, state: FSMContext):
 @dp.message(F.text == "Отмена")
 async def cancel_action(message: Message, state: FSMContext):
     current_state = await state.get_state()
-    if current_state and current_state.startswith(('TemplateForm', 'PaymentForm')):
+    if current_state in (
+            TemplateForm.waiting_for_hours,
+            TemplateForm.waiting_for_names,
+            TemplateForm.waiting_for_tutor_rate,
+            PaymentForm.waiting_for_receipt,
+    ):
         await state.clear()
         await message.answer(
-            "Действие отменено.\n\nВы в меню шаблонов.",
+            "Действие отменено.\nВы вернулись в меню шаблонов.",
             reply_markup=get_samples_keyboard()
         )
     else:
