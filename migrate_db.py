@@ -9,9 +9,11 @@ load_dotenv()
 from database import Base, Payment, WeeklyReport, Template
 
 OLD_DB = os.environ.get("OLD_DATABASE_PATH", "")
-NEW_DB = os.environ.get("DATABASE_URL", "sqlite:///payments.db")
+_db_dir = os.path.dirname(os.path.abspath(__file__))
+_default_new = f"sqlite:///{os.path.join(_db_dir, 'payments.db').replace(chr(92), '/')}"
+NEW_DB = os.environ.get("DATABASE_URL", _default_new)
 if not NEW_DB.startswith("sqlite"):
-    NEW_DB = "sqlite:///payments.db"
+    NEW_DB = _default_new
 
 
 def get_old_path():

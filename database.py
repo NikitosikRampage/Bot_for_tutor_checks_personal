@@ -1,7 +1,11 @@
+import os
+import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Date, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-import datetime
+
+_db_dir = os.path.dirname(os.path.abspath(__file__))
+_db_path = os.path.join(_db_dir, "payments.db")
 
 Base = declarative_base()
 
@@ -87,7 +91,7 @@ class Template(Base):
 
 
 
-engine = create_engine('sqlite:///payments.db', echo=False)
+engine = create_engine(f"sqlite:///{_db_path.replace(chr(92), '/')}", echo=False)
 
 
 def check_and_update_database():
