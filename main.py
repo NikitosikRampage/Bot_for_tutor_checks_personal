@@ -208,30 +208,50 @@ async def show_my_templates(message: Message):
         @dp.message(F.text == "Удалить шаблон")
         async def delete_template_menu(message: Message):
             tutor_id = message.from_user.id
+
             if tutor_id not in tutor_templates or not tutor_templates[tutor_id]:
-                await message.answer("У вас нет шаблонов", reply_markup=get_cancel_keyboard())
+                await message.answer(
+                    "У вас пока нет созданных шаблонов.",
+                    reply_markup=get_cancel_keyboard()  # только "Отмена"
+                )
                 return
 
             builder = InlineKeyboardBuilder()
-            for tpl_name in sorted(tutor_templates[tutor_id].keys()):
-                builder.row(InlineKeyboardButton(text=tpl_name, callback_data=f"tpl_del_{tpl_name}"))
+            for name in sorted(tutor_templates[tutor_id].keys()):
+                builder.add(
+                    InlineKeyboardButton(
+                        text=name,
+                        callback_data=f"del_{name}"
+                    )
+                )
 
-            await message.answer("Выберите шаблон для удаления:", reply_markup=builder.as_markup())
+            await message.answer(
+                "Выберите шаблон, который хотите удалить:",
+                reply_markup=builder.as_markup()
+            )
 
-        @dp.callback_query(F.data.startswith("tpl_del_"))
+        @dp.callback_query(F.data.startswith("del_"))
         async def delete_template(callback: CallbackQuery):
+            template_name = callback.data.removeprefix("del_")
             tutor_id = callback.from_user.id
-            tpl_name = callback.data.removeprefix("tpl_del_")
 
-            if tutor_id in tutor_templates and tpl_name in tutor_templates[tutor_id]:
-                del tutor_templates[tutor_id][tpl_name]
+            if tutor_id in tutor_templates and template_name in tutor_templates[tutor_id]:
+                del tutor_templates[tutor_id][template_name]
                 if not tutor_templates[tutor_id]:
                     del tutor_templates[tutor_id]
-                await callback.message.edit_text(f"Шаблон «{tpl_name}» удалён")
-                await callback.answer("Удалено")
+
+                await callback.message.edit_text(
+                    f"Шаблон «{template_name}» успешно удалён."
+                )
+                await callback.message.answer(
+                    "Что дальше?",
+                    reply_markup=get_samples_keyboard()  # возврат в меню шаблонов
+                )
             else:
                 await callback.answer("Шаблон не найден", show_alert=True)
 
+            await callback.answer()
+            
 @dp.message(F.text == "Добавить оплату")
 async def start_add_payment(message: Message, state: FSMContext):
     await state.set_state(PaymentForm.waiting_for_hours)
@@ -241,13 +261,21 @@ async def start_add_payment(message: Message, state: FSMContext):
     )
 
 
-
 @dp.message(F.text == "Отмена")
 async def cancel_action(message: Message, state: FSMContext):
-    await state.clear()
-    markup = get_admin_keyboard() if Config.is_admin(message.from_user.id) else get_main_keyboard()
-    await message.answer("Отменено.", reply_markup=markup)
-
+    current_state = await state.get_state()
+    if current_state and current_state.startswith(('TemplateForm', 'PaymentForm')):
+        await state.clear()
+        await message.answer(
+            "Действие отменено.\n\nВы в меню шаблонов.",
+            reply_markup=get_samples_keyboard()
+        )
+    else:
+        await state.clear()
+        await message.answer(
+            "Отменено.",
+            reply_markup=get_main_keyboard()
+        )
 
 @dp.message(PaymentForm.waiting_for_hours)
 async def process_hours(message: Message, state: FSMContext):
