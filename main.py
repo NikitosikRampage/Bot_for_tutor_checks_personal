@@ -50,6 +50,7 @@ class TemplateForm(StatesGroup):
     waiting_for_hours     = State()
     waiting_for_names     = State()
     waiting_for_tutor_rate = State()
+    viewing_list          = State()  # пользователь в "Мои шаблоны"
 
 class AdminForm(StatesGroup):
     waiting_for_delete_confirm = State()
@@ -82,8 +83,18 @@ async def templates_menu(message: Message):
 
 @dp.message(F.text == "Вернуться в меню")
 async def back_to_main(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Главное меню", reply_markup=get_main_keyboard())
+    current_state = await state.get_state()
+    if current_state in (
+            TemplateForm.waiting_for_hours,
+            TemplateForm.waiting_for_names,
+            TemplateForm.waiting_for_tutor_rate,
+            TemplateForm.viewing_list,
+    ):
+        await state.clear()
+        await message.answer("Меню шаблонов", reply_markup=get_samples_keyboard())
+    else:
+        await state.clear()
+        await message.answer("Главное меню", reply_markup=get_main_keyboard())
 
 @dp.message(F.text == "Создать шаблон")
 async def start_create_template(message: Message, state: FSMContext):
@@ -98,6 +109,13 @@ async def start_create_template(message: Message, state: FSMContext):
 
 @dp.message(TemplateForm.waiting_for_hours)
 async def process_template_hours(message: Message, state: FSMContext):
+    if message.text and message.text.strip() == "Отмена":
+        await state.clear()
+        await message.answer(
+            "Действие отменено.\nВы вернулись в меню шаблонов.",
+            reply_markup=get_samples_keyboard()
+        )
+        return
     try:
         hours = float(message.text.replace(',', '.'))
         if not 0.1 <= hours <= 12:
@@ -114,6 +132,13 @@ async def process_template_hours(message: Message, state: FSMContext):
 
 @dp.message(TemplateForm.waiting_for_names)
 async def process_template_names(message: Message, state: FSMContext):
+    if message.text and message.text.strip() == "Отмена":
+        await state.clear()
+        await message.answer(
+            "Действие отменено.\nВы вернулись в меню шаблонов.",
+            reply_markup=get_samples_keyboard()
+        )
+        return
     parts = message.text.strip().split(maxsplit=1)
     if len(parts) < 2:
         await message.answer("Введите имя родителя и имя ребёнка через пробел")
@@ -132,6 +157,13 @@ async def process_template_names(message: Message, state: FSMContext):
 
 @dp.message(TemplateForm.waiting_for_tutor_rate)
 async def process_template_rate(message: Message, state: FSMContext):
+    if message.text and message.text.strip() == "Отмена":
+        await state.clear()
+        await message.answer(
+            "Действие отменено.\nВы вернулись в меню шаблонов.",
+            reply_markup=get_samples_keyboard()
+        )
+        return
     try:
         rate = float(message.text.replace(',', '.'))
         if rate <= 0:
@@ -170,12 +202,13 @@ async def process_template_rate(message: Message, state: FSMContext):
         await state.clear()
 
 @dp.message(F.text == "Мои шаблоны")
-async def show_my_templates(message: Message):
+async def show_my_templates(message: Message, state: FSMContext):
     tutor_id = message.from_user.id
     if tutor_id not in tutor_templates or not tutor_templates[tutor_id]:
-        await message.answer("У вас пока нет шаблонов", reply_markup=get_cancel_keyboard())
+        await message.answer("У вас пока нет шаблонов", reply_markup=get_samples_keyboard())
         return
 
+    await state.set_state(TemplateForm.viewing_list)
     builder = InlineKeyboardBuilder()
     for tpl_name in sorted(tutor_templates[tutor_id].keys()):
         builder.row(InlineKeyboardButton(text=tpl_name, callback_data=f"tpl_use_{tpl_name}"))
