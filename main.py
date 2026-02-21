@@ -5,7 +5,6 @@ from datetime import timedelta
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, ContentType
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -17,7 +16,7 @@ from database import Payment, get_session, get_week_start_date, get_week_end_dat
 from keyboards import (
     get_main_keyboard, get_cancel_keyboard, get_admin_keyboard,
     get_pending_actions_keyboard, get_approved_actions_keyboard,
-    get_week_delete_keyboard, get_delete_confirm_keyboard, get_samples_keyboard
+    get_week_delete_keyboard, get_delete_confirm_keyboard
 )
 
 
@@ -27,7 +26,6 @@ from yadisk import YaDisk
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-tutor_templates: dict[int, dict[str, dict]] = {}
 
 TUTOR_NAME_MAPPING = {
     "qq": "Дмитрий Баев",
@@ -46,11 +44,6 @@ class PaymentForm(StatesGroup):
     waiting_for_tutor_rate = State()
     waiting_for_receipt = State()
 
-class TemplateForm(StatesGroup):
-    waiting_for_hours     = State()
-    waiting_for_names     = State()
-    waiting_for_tutor_rate = State()
-    viewing_list          = State()  # пользователь в "Мои шаблоны"
 
 class AdminForm(StatesGroup):
     waiting_for_delete_confirm = State()
@@ -69,228 +62,9 @@ async def cmd_start(message: Message):
     else:
         await message.answer(
             "Бот для учёта оплат репетиторов.\n\n"
-            "Нажмите «Добавить оплату» или «Шаблоны»",
+            "Нажмите «Добавить оплату»",
             reply_markup=get_main_keyboard()
         )
-
-@dp.message(F.text == "Шаблоны")
-async def templates_menu(message: Message):
-    if Config.is_admin(message.from_user.id):
-        await message.answer("Функция недоступна для администраторов")
-        return
-    await message.answer("Меню шаблонов", reply_markup=get_samples_keyboard())
-
-
-@dp.message(F.text == "Вернуться в меню")
-async def back_to_main(message: Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state in (
-            TemplateForm.waiting_for_hours,
-            TemplateForm.waiting_for_names,
-            TemplateForm.waiting_for_tutor_rate,
-            TemplateForm.viewing_list,
-    ):
-        await state.clear()
-        await message.answer("Меню шаблонов", reply_markup=get_samples_keyboard())
-    else:
-        await state.clear()
-        await message.answer("Главное меню", reply_markup=get_main_keyboard())
-
-@dp.message(F.text == "Создать шаблон")
-async def start_create_template(message: Message, state: FSMContext):
-    if Config.is_admin(message.from_user.id):
-        await message.answer("Функция недоступна для администраторов")
-        return
-    await state.set_state(TemplateForm.waiting_for_hours)
-    await message.answer(
-        "Шаг 1/3 • Количество часов\nПример: 1.5  2  0.75",
-        reply_markup=get_cancel_keyboard()
-    )
-
-@dp.message(TemplateForm.waiting_for_hours)
-async def process_template_hours(message: Message, state: FSMContext):
-    if message.text and message.text.strip() == "Отмена":
-        await state.clear()
-        await message.answer(
-            "Действие отменено.\nВы вернулись в меню шаблонов.",
-            reply_markup=get_samples_keyboard()
-        )
-        return
-    try:
-        hours = float(message.text.replace(',', '.'))
-        if not 0.1 <= hours <= 12:
-            await message.answer("Часы должны быть от 0.1 до 12")
-            return
-        await state.update_data(hours=hours)
-        await state.set_state(TemplateForm.waiting_for_names)
-        await message.answer(
-            f"Часы: {hours}\n\n"
-            "Шаг 2/3 • Имя родителя и имя ребёнка (через пробел)\nПример: Анна Матвей"
-        )
-    except ValueError:
-        await message.answer("Пожалуйста, введите число")
-
-@dp.message(TemplateForm.waiting_for_names)
-async def process_template_names(message: Message, state: FSMContext):
-    if message.text and message.text.strip() == "Отмена":
-        await state.clear()
-        await message.answer(
-            "Действие отменено.\nВы вернулись в меню шаблонов.",
-            reply_markup=get_samples_keyboard()
-        )
-        return
-    parts = message.text.strip().split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer("Введите имя родителя и имя ребёнка через пробел")
-        return
-    parent_name = parts[0].strip()
-    student_name = ' '.join(parts[1:]).strip() if len(parts) > 1 else ''
-    if len(parent_name) < 2 or len(student_name) < 2:
-        await message.answer("Имена слишком короткие")
-        return
-    await state.update_data(parent_name=parent_name, student_name=student_name)
-    await state.set_state(TemplateForm.waiting_for_tutor_rate)
-    await message.answer(
-        f"Родитель: {parent_name}\nРебёнок: {student_name}\n\n"
-        "Шаг 3/3 • Ваша ставка за час (руб)"
-    )
-
-@dp.message(TemplateForm.waiting_for_tutor_rate)
-async def process_template_rate(message: Message, state: FSMContext):
-    if message.text and message.text.strip() == "Отмена":
-        await state.clear()
-        await message.answer(
-            "Действие отменено.\nВы вернулись в меню шаблонов.",
-            reply_markup=get_samples_keyboard()
-        )
-        return
-    try:
-        rate = float(message.text.replace(',', '.'))
-        if rate <= 0:
-            await message.answer("Ставка должна быть больше 0")
-            return
-
-        data = await state.get_data()
-        template_name = f"👩‍🏫 {data['parent_name']}/{data['student_name']} | 💰{rate}₽ | ⏰{data['hours']}ч"
-
-        tutor_id = message.from_user.id
-        if tutor_id not in tutor_templates:
-            tutor_templates[tutor_id] = {}
-
-        if template_name in tutor_templates[tutor_id]:
-            await message.answer("Шаблон с такими данными уже существует")
-            await state.clear()
-            return
-
-        tutor_templates[tutor_id][template_name] = {
-            "hours": data["hours"],
-            "parent_name": data["parent_name"],
-            "student_name": data["student_name"],
-            "tutor_rate": rate
-        }
-
-        await message.answer(
-            f"Шаблон успешно создан:\n{template_name}",
-            reply_markup=get_samples_keyboard()
-        )
-        await state.clear()
-
-    except ValueError:
-        await message.answer("Введите корректное число")
-    except Exception as e:
-        await message.answer(f"Ошибка при создании шаблона: {e}")
-        await state.clear()
-
-@dp.message(F.text == "Мои шаблоны")
-async def show_my_templates(message: Message, state: FSMContext):
-    tutor_id = message.from_user.id
-    if tutor_id not in tutor_templates or not tutor_templates[tutor_id]:
-        await message.answer("У вас пока нет шаблонов", reply_markup=get_samples_keyboard())
-        return
-
-    builder = InlineKeyboardBuilder()
-    for tpl_name in sorted(tutor_templates[tutor_id].keys()):
-        builder.row(InlineKeyboardButton(text=tpl_name, callback_data=f"tpl_use_{tpl_name}"))
-
-    await message.answer("Ваши шаблоны:", reply_markup=builder.as_markup())
-    await state.set_state(TemplateForm.viewing_list)
-
-    @dp.callback_query(F.data.startswith("tpl_use_"))
-    async def use_template(callback: CallbackQuery, state: FSMContext):
-        tutor_id = callback.from_user.id
-        tpl_name = callback.data.removeprefix("tpl_use_")
-
-        if tutor_id not in tutor_templates or tpl_name not in tutor_templates[tutor_id]:
-            await callback.answer("Шаблон не найден", show_alert=True)
-            return
-
-        tpl = tutor_templates[tutor_id][tpl_name]
-
-        await state.update_data(
-            hours=tpl["hours"],
-            parent_name=tpl["parent_name"],
-            student_name=tpl["student_name"],
-            tutor_rate=tpl["tutor_rate"]
-        )
-        await state.set_state(PaymentForm.waiting_for_receipt)
-
-        await callback.message.answer(
-            f"Выбран шаблон:\n{tpl_name}\n\n"
-            f"Осталось отправить чек (фото или документ)",
-            reply_markup=get_cancel_keyboard()
-        )
-        await callback.answer()
-
-
-@dp.message(F.text == "Удалить шаблон")
-async def delete_template_menu(message: Message):
-    if Config.is_admin(message.from_user.id):
-        await message.answer("Функция недоступна для администраторов")
-        return
-    tutor_id = message.from_user.id
-
-    if tutor_id not in tutor_templates or not tutor_templates[tutor_id]:
-        await message.answer(
-            "У вас пока нет созданных шаблонов для удаления.",
-            reply_markup=get_samples_keyboard()
-        )
-        return
-
-    builder = InlineKeyboardBuilder()
-    for name in sorted(tutor_templates[tutor_id]):
-        builder.row(
-            InlineKeyboardButton(
-                text=name,
-                callback_data=f"del_{name}"
-            )
-        )
-
-    await message.answer(
-        "Выберите шаблон, который хотите удалить:",
-        reply_markup=builder.as_markup()
-    )
-
-
-@dp.callback_query(F.data.startswith("del_"))
-async def delete_template(callback: CallbackQuery):
-    template_name = callback.data.removeprefix("del_")
-    tutor_id = callback.from_user.id
-
-    if tutor_id in tutor_templates and template_name in tutor_templates[tutor_id]:
-        del tutor_templates[tutor_id][template_name]
-        if not tutor_templates[tutor_id]:
-            del tutor_templates[tutor_id]
-
-        await callback.message.edit_text(
-            f"Шаблон «{template_name}» успешно удалён."
-        )
-        await callback.message.answer(
-            "Что дальше?",
-            reply_markup=get_samples_keyboard()
-        )
-        await callback.answer()
-    else:
-        await callback.answer("Шаблон не найден или уже удалён", show_alert=True)
 
 
 @dp.message(F.text == "Добавить оплату")
@@ -302,26 +76,13 @@ async def start_add_payment(message: Message, state: FSMContext):
     )
 
 
+
 @dp.message(F.text == "Отмена")
 async def cancel_action(message: Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state in (
-            TemplateForm.waiting_for_hours,
-            TemplateForm.waiting_for_names,
-            TemplateForm.waiting_for_tutor_rate,
-            PaymentForm.waiting_for_receipt,
-    ):
-        await state.clear()
-        await message.answer(
-            "Действие отменено.\nВы вернулись в меню шаблонов.",
-            reply_markup=get_samples_keyboard()
-        )
-    else:
-        await state.clear()
-        await message.answer(
-            "Отменено.",
-            reply_markup=get_main_keyboard()
-        )
+    await state.clear()
+    markup = get_admin_keyboard() if Config.is_admin(message.from_user.id) else get_main_keyboard()
+    await message.answer("Отменено.", reply_markup=markup)
+
 
 @dp.message(PaymentForm.waiting_for_hours)
 async def process_hours(message: Message, state: FSMContext):
