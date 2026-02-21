@@ -6,17 +6,18 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, ContentType
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from sqlalchemy import func
 
 from config import Config, ADMIN_IDS, BOT_TOKEN
-from database import Payment, get_session, get_week_start_date, get_week_end_date
+from database import Payment, Template, get_session, get_week_start_date, get_week_end_date
 from keyboards import (
     get_main_keyboard, get_cancel_keyboard, get_admin_keyboard,
     get_pending_actions_keyboard, get_approved_actions_keyboard,
-    get_week_delete_keyboard, get_delete_confirm_keyboard
+    get_week_delete_keyboard, get_delete_confirm_keyboard, get_samples_keyboard
 )
 
 
@@ -47,6 +48,15 @@ class PaymentForm(StatesGroup):
 
 class AdminForm(StatesGroup):
     waiting_for_delete_confirm = State()
+    waiting_for_broadcast_text = State()
+
+
+class TemplateForm(StatesGroup):
+    waiting_for_hours = State()
+    waiting_for_names = State()
+    waiting_for_tutor_rate = State()
+    viewing_list = State()
+
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
@@ -62,9 +72,271 @@ async def cmd_start(message: Message):
     else:
         await message.answer(
             "Бот для учёта оплат репетиторов.\n\n"
-            "Нажмите «Добавить оплату»",
+            "Нажмите «Добавить оплату» или «Шаблоны»",
             reply_markup=get_main_keyboard()
         )
+
+
+@dp.message(F.text == "Вернуться в меню")
+async def back_to_main(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state in (
+            TemplateForm.waiting_for_hours,
+            TemplateForm.waiting_for_names,
+            TemplateForm.waiting_for_tutor_rate,
+            TemplateForm.viewing_list,
+    ):
+        await state.clear()
+        await message.answer("Выберите действие", reply_markup=get_samples_keyboard())
+    else:
+        await state.clear()
+        await message.answer("Выберите действие", reply_markup=get_main_keyboard())
+
+
+@dp.message(F.text == "Отмена")
+async def cancel_action(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state in (
+            TemplateForm.waiting_for_hours,
+            TemplateForm.waiting_for_names,
+            TemplateForm.waiting_for_tutor_rate,
+            PaymentForm.waiting_for_receipt,
+    ):
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=get_samples_keyboard())
+    else:
+        await state.clear()
+        markup = get_admin_keyboard() if Config.is_admin(message.from_user.id) else get_main_keyboard()
+        await message.answer("Отменено.", reply_markup=markup)
+
+
+@dp.message(F.text == "Шаблоны")
+async def templates_menu(message: Message):
+    if Config.is_admin(message.from_user.id):
+        await message.answer("Функция недоступна для администраторов")
+        return
+    await message.answer("Выберите действие", reply_markup=get_samples_keyboard())
+
+
+@dp.message(F.text == "Создать шаблон")
+async def start_create_template(message: Message, state: FSMContext):
+    if Config.is_admin(message.from_user.id):
+        await message.answer("Функция недоступна для администраторов")
+        return
+    await state.set_state(TemplateForm.waiting_for_hours)
+    await message.answer(
+        "Шаг 1/3 • Количество часов\nПример: 1.5  2  0.75",
+        reply_markup=get_cancel_keyboard()
+    )
+
+
+@dp.message(TemplateForm.waiting_for_hours)
+async def process_template_hours(message: Message, state: FSMContext):
+    if message.text and message.text.strip() == "Отмена":
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=get_samples_keyboard())
+        return
+    try:
+        hours = float(message.text.replace(",", "."))
+        if not 0.1 <= hours <= 12:
+            await message.answer("Часы должны быть от 0.1 до 12")
+            return
+        await state.update_data(hours=hours)
+        await state.set_state(TemplateForm.waiting_for_names)
+        await message.answer(
+            f"Часы: {hours}\n\nШаг 2/3 • Имя родителя и имя ребёнка (через пробел)\nПример: Анна Матвей"
+        )
+    except ValueError:
+        await message.answer("Пожалуйста, введите число")
+
+
+@dp.message(TemplateForm.waiting_for_names)
+async def process_template_names(message: Message, state: FSMContext):
+    if message.text and message.text.strip() == "Отмена":
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=get_samples_keyboard())
+        return
+    parts = message.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Введите имя родителя и имя ребёнка через пробел")
+        return
+    parent_name, student_name = parts[0].strip(), (parts[1].strip() if len(parts) > 1 else "")
+    if len(parent_name) < 2 or len(student_name) < 2:
+        await message.answer("Имена слишком короткие")
+        return
+    await state.update_data(parent_name=parent_name, student_name=student_name)
+    await state.set_state(TemplateForm.waiting_for_tutor_rate)
+    await message.answer(
+        f"Родитель: {parent_name}\nРебёнок: {student_name}\n\nШаг 3/3 • Ваша ставка за час (руб)"
+    )
+
+
+@dp.message(TemplateForm.waiting_for_tutor_rate)
+async def process_template_rate(message: Message, state: FSMContext):
+    if message.text and message.text.strip() == "Отмена":
+        await state.clear()
+        await message.answer("Отменено.", reply_markup=get_samples_keyboard())
+        return
+    try:
+        rate = float(message.text.replace(",", "."))
+        if rate <= 0:
+            await message.answer("Ставка должна быть больше 0")
+            return
+        data = await state.get_data()
+        display_name = f"👩‍🏫 {data['parent_name']}/{data['student_name']} | 💰{rate}₽ | ⏰{data['hours']}ч"
+        tutor_id = message.from_user.id
+        session = None
+        try:
+            session = get_session()
+            existing = session.query(Template).filter_by(tutor_id=tutor_id, display_name=display_name).first()
+            if existing:
+                await message.answer("Шаблон с такими данными уже существует", reply_markup=get_samples_keyboard())
+                await state.clear()
+                return
+            t = Template(
+                tutor_id=tutor_id,
+                display_name=display_name,
+                hours=data["hours"],
+                parent_name=data["parent_name"],
+                student_name=data["student_name"],
+                tutor_rate=rate,
+            )
+            session.add(t)
+            session.commit()
+            await message.answer(
+                f"Шаблон успешно создан:\n{display_name}",
+                reply_markup=get_samples_keyboard()
+            )
+        except Exception as e:
+            if session:
+                session.rollback()
+            await message.answer(f"Ошибка при создании шаблона: {e}")
+        finally:
+            if session:
+                session.close()
+        await state.clear()
+    except ValueError:
+        await message.answer("Введите корректное число")
+
+
+@dp.message(F.text == "Мои шаблоны")
+async def show_my_templates(message: Message, state: FSMContext):
+    if Config.is_admin(message.from_user.id):
+        await message.answer("Функция недоступна для администраторов")
+        return
+    tutor_id = message.from_user.id
+    session = None
+    try:
+        session = get_session()
+        templates = session.query(Template).filter_by(tutor_id=tutor_id).order_by(Template.display_name).all()
+        if not templates:
+            await message.answer("У вас пока нет шаблонов", reply_markup=get_samples_keyboard())
+            return
+        builder = InlineKeyboardBuilder()
+        for i, t in enumerate(templates):
+            cb = f"tpl_{i}"
+            if len(cb.encode("utf-8")) > 64:
+                cb = f"tpl_{i % 10000}"
+            builder.row(InlineKeyboardButton(text=t.display_name, callback_data=cb))
+        await message.answer("Ваши шаблоны", reply_markup=builder.as_markup())
+        await state.set_state(TemplateForm.viewing_list)
+    except Exception as e:
+        await message.answer(f"Ошибка: {e}")
+    finally:
+        if session:
+            session.close()
+
+
+@dp.callback_query(F.data.startswith("tpl_"))
+async def use_template(callback: CallbackQuery, state: FSMContext):
+    idx_str = callback.data.removeprefix("tpl_")
+    if not idx_str.isdigit():
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    tutor_id = callback.from_user.id
+    session = None
+    try:
+        session = get_session()
+        templates = session.query(Template).filter_by(tutor_id=tutor_id).order_by(Template.display_name).all()
+        i = int(idx_str)
+        if i < 0 or i >= len(templates):
+            await callback.answer("Шаблон не найден", show_alert=True)
+            return
+        t = templates[i]
+        await state.update_data(
+            hours=t.hours,
+            parent_name=t.parent_name,
+            student_name=t.student_name,
+            tutor_rate=t.tutor_rate,
+        )
+        await state.set_state(PaymentForm.waiting_for_receipt)
+        await callback.message.answer(
+            f"Выбран шаблон:\n{t.display_name}\n\nОсталось отправить чек (фото или документ)",
+            reply_markup=get_cancel_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        await callback.answer(f"Ошибка: {e}", show_alert=True)
+    finally:
+        if session:
+            session.close()
+
+
+@dp.message(F.text == "Удалить шаблон")
+async def delete_template_menu(message: Message):
+    if Config.is_admin(message.from_user.id):
+        await message.answer("Функция недоступна для администраторов")
+        return
+    tutor_id = message.from_user.id
+    session = None
+    try:
+        session = get_session()
+        templates = session.query(Template).filter_by(tutor_id=tutor_id).order_by(Template.display_name).all()
+        if not templates:
+            await message.answer("У вас пока нет созданных шаблонов для удаления.", reply_markup=get_samples_keyboard())
+            return
+        builder = InlineKeyboardBuilder()
+        for i, t in enumerate(templates):
+            cb = f"del_{i}"
+            if len(cb.encode("utf-8")) > 64:
+                cb = f"del_{i % 10000}"
+            builder.row(InlineKeyboardButton(text=t.display_name, callback_data=cb))
+        await message.answer("Выберите шаблон, который хотите удалить:", reply_markup=builder.as_markup())
+    except Exception as e:
+        await message.answer(f"Ошибка: {e}")
+    finally:
+        if session:
+            session.close()
+
+
+@dp.callback_query(F.data.startswith("del_"))
+async def delete_template(callback: CallbackQuery):
+    idx_str = callback.data.removeprefix("del_")
+    if not idx_str.isdigit():
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    tutor_id = callback.from_user.id
+    session = None
+    try:
+        session = get_session()
+        templates = session.query(Template).filter_by(tutor_id=tutor_id).order_by(Template.display_name).all()
+        i = int(idx_str)
+        if i < 0 or i >= len(templates):
+            await callback.answer("Шаблон не найден или уже удалён", show_alert=True)
+            return
+        t = templates[i]
+        template_name = t.display_name
+        session.delete(t)
+        session.commit()
+        await callback.message.edit_text(f"Шаблон «{template_name}» успешно удалён.")
+        await callback.answer()
+    except Exception as e:
+        if session:
+            session.rollback()
+        await callback.answer("Ошибка при удалении", show_alert=True)
+    finally:
+        if session:
+            session.close()
 
 
 @dp.message(F.text == "Добавить оплату")
@@ -74,14 +346,6 @@ async def start_add_payment(message: Message, state: FSMContext):
         "Шаг 1/4 • Часы\nПример: 1.5, 2, 0.75",
         reply_markup=get_cancel_keyboard()
     )
-
-
-
-@dp.message(F.text == "Отмена")
-async def cancel_action(message: Message, state: FSMContext):
-    await state.clear()
-    markup = get_admin_keyboard() if Config.is_admin(message.from_user.id) else get_main_keyboard()
-    await message.answer("Отменено.", reply_markup=markup)
 
 
 @dp.message(PaymentForm.waiting_for_hours)
@@ -255,7 +519,7 @@ async def show_my_payments(message: Message):
                 f"  {p.student_name} • {p.hours} ч • {p.tutor_rate} ₽"
             )
 
-        await message.answer("Ваши платежи:\n\n" + "\n\n".join(lines))
+        await message.answer("Ваши платежи\n\n" + "\n\n".join(lines))
 
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
@@ -301,6 +565,60 @@ async def show_pending(message: Message):
         if session is not None:
             session.close()
 
+
+@dp.message(F.text == "Сообщение репетиторам")
+async def start_broadcast(message: Message, state: FSMContext):
+    if not Config.is_admin(message.from_user.id):
+        await message.answer("Нет доступа")
+        return
+    await state.set_state(AdminForm.waiting_for_broadcast_text)
+    await message.answer(
+        "Введите текст сообщения для всех репетиторов.\n"
+        "Напишите «Отмена», чтобы отменить рассылку.",
+        reply_markup=get_cancel_keyboard()
+    )
+
+
+@dp.message(AdminForm.waiting_for_broadcast_text)
+async def process_broadcast(message: Message, state: FSMContext):
+    if not Config.is_admin(message.from_user.id):
+        await state.clear()
+        return
+    if message.text and message.text.strip().lower() == "отмена":
+        await state.clear()
+        await message.answer("Рассылка отменена.", reply_markup=get_admin_keyboard())
+        return
+
+    session = None
+    try:
+        session = get_session()
+        tutor_ids = set()
+        for (tid,) in session.query(Payment.tutor_id).distinct().all():
+            tutor_ids.add(tid)
+        for (tid,) in session.query(Template.tutor_id).distinct().all():
+            tutor_ids.add(tid)
+        for admin_id in ADMIN_IDS:
+            tutor_ids.discard(admin_id)
+    finally:
+        if session:
+            session.close()
+
+    text = message.text or ""
+    sent = 0
+    failed = 0
+    for uid in tutor_ids:
+        try:
+            await bot.send_message(uid, f"📢 Сообщение от администрации:\n\n{text}")
+            sent += 1
+        except Exception:
+            failed += 1
+
+    await state.clear()
+    await message.answer(
+        f"✅ Разослано репетиторам: {sent}\n"
+        + (f"❌ Не доставлено (бот заблокирован или ошибка): {failed}" if failed else ""),
+        reply_markup=get_admin_keyboard()
+    )
 
 
 @dp.message(F.text == "Все платежи")
@@ -464,6 +782,19 @@ async def approve_payment(callback: CallbackQuery):
             await callback.answer("Платеж не найден")
             return
 
+        if payment.status != 'pending':
+            await callback.answer("Платёж уже обработан другим админом", show_alert=True)
+            try:
+                await callback.message.edit_caption(
+                    caption=(
+                        (callback.message.caption or "") + "\n\n⚠️ Уже обработан другим админом."
+                    ),
+                    reply_markup=None
+                )
+            except Exception:
+                pass
+            return
+
         payment.status = 'approved'
         session.commit()
 
@@ -560,6 +891,19 @@ async def reject_and_delete(callback: CallbackQuery):
         payment = session.get(Payment, pid)
         if not payment:
             await callback.answer("Платеж не найден", show_alert=True)
+            return
+
+        if payment.status != 'pending':
+            await callback.answer("Платёж уже обработан другим админом (подтверждён)", show_alert=True)
+            try:
+                await callback.message.edit_caption(
+                    caption=(
+                        (callback.message.caption or "") + "\n\n⚠️ Уже обработан другим админом."
+                    ),
+                    reply_markup=None
+                )
+            except Exception:
+                pass
             return
 
         tutor_id = payment.tutor_id

@@ -5,6 +5,44 @@ import datetime
 
 Base = declarative_base()
 
+def upgrade_database():
+    conn = engine.connect()
+    inspector = inspect(engine)
+
+    model_map = {
+        'payments': Payment,
+        'weekly_reports': WeeklyReport,
+        'templates': Template,
+    }
+
+    for table_name, model in model_map.items():
+        if table_name in inspector.get_table_names():
+            existing_columns = [col['name'] for col in inspector.get_columns(table_name)]
+            for column in model.__table__.columns:
+                if column.name not in existing_columns:
+                    col_type = column.type.compile(engine.dialect)
+                    sql = f'ALTER TABLE {table_name} ADD COLUMN {column.name} {col_type}'
+                    if not column.nullable:
+                        sql += ' NOT NULL DEFAULT '
+                        if hasattr(column, 'default') and column.default is not None:
+                            def_val = column.default.arg
+                            if isinstance(def_val, (int, float)):
+                                sql += str(def_val)
+                            elif isinstance(def_val, str):
+                                sql += f"'{def_val}'"
+                            elif callable(def_val):
+                                sql += f"'{def_val()}'"
+                            else:
+                                sql += "'0'"
+                        else:
+                            if 'CHAR' in col_type or 'TEXT' in col_type:
+                                sql += "''"
+                            elif 'INT' in col_type or 'REAL' in col_type or 'FLOAT' in col_type:
+                                sql += "0"
+                            else:
+                                sql += "''"
+                    conn.execute(sql)
+    conn.close()
 
 class Payment(Base):
     __tablename__ = 'payments'
@@ -36,12 +74,23 @@ class WeeklyReport(Base):
     report_generated = Column(DateTime, default=datetime.datetime.now)
 
 
+class Template(Base):
+    __tablename__ = 'templates'
+
+    id = Column(Integer, primary_key=True)
+    tutor_id = Column(Integer, nullable=False)
+    display_name = Column(String, nullable=False)
+    hours = Column(Float, nullable=False)
+    parent_name = Column(String, nullable=False)
+    student_name = Column(String, nullable=False)
+    tutor_rate = Column(Float, nullable=False)
+
+
 
 engine = create_engine('sqlite:///payments.db', echo=False)
 
 
 def check_and_update_database():
-    """Создаёт таблицы, если их нет, и добавляет отсутствующие столбцы"""
     inspector = inspect(engine)
 
     if not inspector.has_table('payments'):
@@ -79,6 +128,10 @@ def check_and_update_database():
         if not inspector.has_table('weekly_reports'):
             WeeklyReport.__table__.create(engine)
             print("Создана таблица weekly_reports")
+
+        if not inspector.has_table('templates'):
+            Template.__table__.create(engine)
+            print("Создана таблица templates")
 
     finally:
         conn.close()
