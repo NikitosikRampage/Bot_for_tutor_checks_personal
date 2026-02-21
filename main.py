@@ -208,12 +208,12 @@ async def show_my_templates(message: Message, state: FSMContext):
         await message.answer("У вас пока нет шаблонов", reply_markup=get_samples_keyboard())
         return
 
-    await state.set_state(TemplateForm.viewing_list)
     builder = InlineKeyboardBuilder()
     for tpl_name in sorted(tutor_templates[tutor_id].keys()):
         builder.row(InlineKeyboardButton(text=tpl_name, callback_data=f"tpl_use_{tpl_name}"))
 
     await message.answer("Ваши шаблоны:", reply_markup=builder.as_markup())
+    await state.set_state(TemplateForm.viewing_list)
 
     @dp.callback_query(F.data.startswith("tpl_use_"))
     async def use_template(callback: CallbackQuery, state: FSMContext):
