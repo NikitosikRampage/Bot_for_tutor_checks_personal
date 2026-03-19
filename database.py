@@ -64,6 +64,7 @@ class Payment(Base):
     week_start_date = Column(Date, nullable=True)
     status = Column(String, default='pending')
     admin_note = Column(String, nullable=True)
+    admin_messages = Column(String, nullable=True)
 
 
 class WeeklyReport(Base):
@@ -89,6 +90,14 @@ class Template(Base):
     student_name = Column(String, nullable=False)
     tutor_rate = Column(Float, nullable=False)
 
+class User(Base):
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True)
+    tutor_id = Column(Integer, unique=True, nullable=False)
+    tutor_name = Column(String, nullable=False)
+    registered_at = Column(DateTime, default=datetime.datetime.now)
+    last_active = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
 
 
 engine = create_engine(f"sqlite:///{_db_path.replace(chr(92), '/')}", echo=False)
@@ -136,6 +145,10 @@ def check_and_update_database():
         if not inspector.has_table('templates'):
             Template.__table__.create(engine)
             print("Создана таблица templates")
+
+        if not inspector.has_table('users'):
+            User.__table__.create(engine)
+            print("Создана таблица users")
 
     finally:
         conn.close()

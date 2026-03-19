@@ -6,7 +6,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 from dotenv import load_dotenv
 load_dotenv()
 
-from database import Base, Payment, WeeklyReport, Template
+from database import Base, Payment, WeeklyReport, Template, User
 
 OLD_DB = os.environ.get("OLD_DATABASE_PATH", "")
 _db_dir = os.path.dirname(os.path.abspath(__file__))
@@ -41,6 +41,7 @@ def migrate(old_path: str, new_url: str = NEW_DB):
         ("payments", Payment),
         ("weekly_reports", WeeklyReport),
         ("templates", Template),
+        ("users", User),
     ]
 
     for table_name, model in tables:

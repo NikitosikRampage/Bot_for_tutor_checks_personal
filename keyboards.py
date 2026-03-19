@@ -83,3 +83,13 @@ def get_delete_confirm_keyboard():
         resize_keyboard=True,
         one_time_keyboard=True
     )
+
+def get_broadcast_confirm_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Да, отправить")],
+            [KeyboardButton(text="Отмена")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )

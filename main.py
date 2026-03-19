@@ -13,16 +13,18 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from sqlalchemy import func
 
 from config import Config, ADMIN_IDS, BOT_TOKEN
-from database import Payment, Template, get_session, get_week_start_date, get_week_end_date
+from database import Payment, Template, User, get_session, get_week_start_date, get_week_end_date
 from keyboards import (
     get_main_keyboard, get_cancel_keyboard, get_admin_keyboard,
     get_pending_actions_keyboard, get_approved_actions_keyboard,
-    get_week_delete_keyboard, get_delete_confirm_keyboard, get_samples_keyboard
+    get_week_delete_keyboard, get_delete_confirm_keyboard, get_samples_keyboard, get_broadcast_confirm_keyboard
 )
 
 
 import yadisk
 from yadisk import YaDisk
+
+
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -60,7 +62,28 @@ class TemplateForm(StatesGroup):
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
-    if Config.is_admin(message.from_user.id):
+    tutor_id = message.from_user.id
+    tutor_name = message.from_user.full_name
+    session = get_session()
+    try:
+        user = session.query(User).filter_by(tutor_id=tutor_id).first()
+        if not user:
+            new_user = User(
+                tutor_id=tutor_id,
+                tutor_name=tutor_name
+            )
+            session.add(new_user)
+            session.commit()
+            print(f"Новый репетитор зарегистрирован: {tutor_name} (ID: {tutor_id})")
+        else:
+            user.last_active = datetime.datetime.now()
+            session.commit()
+    except Exception as e:
+        print(f"Ошибка при сохранении пользователя {tutor_id}: {e}")
+    finally:
+        session.close()
+
+    if Config.is_admin(tutor_id):
         await message.answer(
             "Панель администратора\n\n"
             "Команды:\n"
@@ -478,17 +501,25 @@ async def notify_admins_about_new_payment(payment_id: int):
         )
 
         markup = get_pending_actions_keyboard(p.id)
+        admin_messages = {}
 
         for admin_id in ADMIN_IDS:
             try:
                 if p.receipt_type == 'photo':
-                    await bot.send_photo(admin_id, p.receipt_file_id, caption=text, reply_markup=markup)
+                   sent = await bot.send_photo(admin_id, p.receipt_file_id, caption=text, reply_markup=markup)
                 elif p.receipt_type == 'document':
-                    await bot.send_document(admin_id, p.receipt_file_id, caption=text, reply_markup=markup)
+                    sent = await bot.send_document(admin_id, p.receipt_file_id, caption=text, reply_markup=markup)
                 else:
-                    await bot.send_message(admin_id, text, reply_markup=markup)
+                    sent = await bot.send_message(admin_id, text, reply_markup=markup)
+
+                admin_messages[str(admin_id)] = sent.message_id
+
             except Exception as send_err:
                 print(f"Не удалось отправить админу {admin_id}: {send_err}")
+
+        import json
+        p.admin_messages = json.dumps(admin_messages)
+        session.commit()
 
     except Exception as e:
         print(f"Ошибка при уведомлении админов: {e}")
@@ -566,60 +597,91 @@ async def show_pending(message: Message):
             session.close()
 
 
+
+
 @dp.message(F.text == "Сообщение репетиторам")
+@dp.message(Command("broadcast"))
 async def start_broadcast(message: Message, state: FSMContext):
     if not Config.is_admin(message.from_user.id):
         await message.answer("Нет доступа")
         return
+
     await state.set_state(AdminForm.waiting_for_broadcast_text)
     await message.answer(
-        "Введите текст сообщения для всех репетиторов.\n"
-        "Напишите «Отмена», чтобы отменить рассылку.",
+        "Введите текст, который хотите отправить всем репетиторам:\n\n"
+        "Для отмены нажмите «Отмена»",
         reply_markup=get_cancel_keyboard()
     )
 
 
-@dp.message(AdminForm.waiting_for_broadcast_text)
-async def process_broadcast(message: Message, state: FSMContext):
-    if not Config.is_admin(message.from_user.id):
-        await state.clear()
-        return
-    if message.text and message.text.strip().lower() == "отмена":
+@dp.message(AdminForm.waiting_for_broadcast_text, ~F.text.in_(["Да, отправить", "да, отправить", "Да"]))
+async def process_broadcast_text(message: Message, state: FSMContext):
+    text = message.text.strip()
+
+    if text.lower() in ["отмена", "cancel", "выход"]:
         await state.clear()
         await message.answer("Рассылка отменена.", reply_markup=get_admin_keyboard())
         return
 
-    session = None
-    try:
-        session = get_session()
-        tutor_ids = set()
-        for (tid,) in session.query(Payment.tutor_id).distinct().all():
-            tutor_ids.add(tid)
-        for (tid,) in session.query(Template.tutor_id).distinct().all():
-            tutor_ids.add(tid)
-        for admin_id in ADMIN_IDS:
-            tutor_ids.discard(admin_id)
-    finally:
-        if session:
-            session.close()
+    if not text:
+        await message.answer("Текст не может быть пустым. Введите сообщение:")
+        return
+    await state.update_data(broadcast_text=text)
 
-    text = message.text or ""
-    sent = 0
-    failed = 0
-    for uid in tutor_ids:
-        try:
-            await bot.send_message(uid, f"📢 Сообщение от администрации:\n\n{text}")
-            sent += 1
-        except Exception:
-            failed += 1
-
-    await state.clear()
     await message.answer(
-        f"✅ Разослано репетиторам: {sent}\n"
-        + (f"❌ Не доставлено (бот заблокирован или ошибка): {failed}" if failed else ""),
-        reply_markup=get_admin_keyboard()
+        f"Вы уверены, что хотите отправить это сообщение всем репетиторам?\n\n"
+        f"Текст:\n{text}\n\n"
+        "Нажмите «Да, отправить» для подтверждения или «Отмена»",
+        reply_markup=get_broadcast_confirm_keyboard()
     )
 
+
+@dp.message(AdminForm.waiting_for_broadcast_text, F.text.in_(["Да, отправить", "да, отправить", "Да"]))
+async def execute_broadcast(message: Message, state: FSMContext):
+    if not Config.is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    broadcast_text = data.get("broadcast_text")
+
+    if not broadcast_text:
+        await message.answer("❌ Ошибка: текст не найден. Начните заново.")
+        await state.clear()
+        return
+
+    session = get_session()
+    try:
+        users = session.query(User).all()
+        admin_ids = set(Config.get_admins())
+
+        sent = 0
+        failed = 0
+
+        for user in users:
+            if user.tutor_id in admin_ids and user.tutor_id:
+                continue
+
+            try:
+                await bot.send_message(user.tutor_id, f"📢Сообщение от администрации📢:\n\n{broadcast_text} ")
+                sent += 1
+                await asyncio.sleep(0.04)
+            except Exception as e:
+                print(f"❌ Не удалось отправить {user.tutor_id}: {e}")
+                failed += 1
+
+        await message.answer(
+            f"✅ Рассылка завершена!\n\n"
+            f"Отправлено: {sent} репетиторам\n"
+            f"Текст:\n{broadcast_text}",
+            reply_markup=get_admin_keyboard()
+        )
+
+    except Exception as e:
+        await message.answer(f"Ошибка при рассылке: {str(e)}")
+    finally:
+        session.close()
+        await state.clear()
 
 @dp.message(F.text == "Все платежи")
 @dp.message(Command("all"))
@@ -782,19 +844,6 @@ async def approve_payment(callback: CallbackQuery):
             await callback.answer("Платеж не найден")
             return
 
-        if payment.status != 'pending':
-            await callback.answer("Платёж уже обработан другим админом", show_alert=True)
-            try:
-                await callback.message.edit_caption(
-                    caption=(
-                        (callback.message.caption or "") + "\n\n⚠️ Уже обработан другим админом."
-                    ),
-                    reply_markup=None
-                )
-            except Exception:
-                pass
-            return
-
         payment.status = 'approved'
         session.commit()
 
@@ -825,6 +874,27 @@ async def approve_payment(callback: CallbackQuery):
             caption=new_caption,
             reply_markup=get_approved_actions_keyboard(payment.id)
         )
+
+        if payment.admin_messages:
+            try:
+                import json
+                msg_dict = json.loads(payment.admin_messages)
+                for admin_id_str, msg_id in msg_dict.items():
+                    admin_id = int(admin_id_str)
+                    if admin_id == callback.from_user.id:
+                        continue
+
+                    try:
+                        await bot.edit_message_caption(
+                            chat_id=admin_id,
+                            message_id=msg_id,
+                            caption=new_caption,
+                            reply_markup=get_approved_actions_keyboard(payment.id)
+                        )
+                    except:
+                        pass
+            except:
+                pass
 
         await callback.answer("✅ Платёж подтверждён")
 
@@ -891,19 +961,6 @@ async def reject_and_delete(callback: CallbackQuery):
         payment = session.get(Payment, pid)
         if not payment:
             await callback.answer("Платеж не найден", show_alert=True)
-            return
-
-        if payment.status != 'pending':
-            await callback.answer("Платёж уже обработан другим админом (подтверждён)", show_alert=True)
-            try:
-                await callback.message.edit_caption(
-                    caption=(
-                        (callback.message.caption or "") + "\n\n⚠️ Уже обработан другим админом."
-                    ),
-                    reply_markup=None
-                )
-            except Exception:
-                pass
             return
 
         tutor_id = payment.tutor_id
