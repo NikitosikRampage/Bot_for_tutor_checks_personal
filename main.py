@@ -25,8 +25,15 @@ import yadisk
 from yadisk import YaDisk
 
 
+import logging
+logging.basicConfig(level=logging.INFO)
+import yadisk
+from yadisk import YaDisk
 
-bot = Bot(token=BOT_TOKEN)
+from aiohttp import ClientSession
+from aiohttp_socks import ProxyConnector
+from aiogram.client.session.aiohttp import AiohttpSession
+
 dp = Dispatcher(storage=MemoryStorage())
 
 
@@ -1122,13 +1129,30 @@ async def find_payment(message: Message):
         if session is not None:
             session.close()
 
-async def main():
-    print("БОТ ДЛЯ РЕПЕТИТОРОВ ЗАПУЩЕН")
-    await dp.start_polling(
-        bot,
-        drop_pending_updates=True,
-    )
 
+async def main():
+    global bot
+
+    PROXY_URL = "socks5://appAgG:Xok0nq@45.133.220.218:8000"
+
+    from aiogram import Bot
+    from aiogram.client.session.aiohttp import AiohttpSession
+
+    logging.info(
+        f"Подключение через прокси: {PROXY_URL.split('://')[1].split('@')[-1] if '@' in PROXY_URL else PROXY_URL}")
+
+    bot_session = AiohttpSession(proxy=PROXY_URL)
+    bot = Bot(token=BOT_TOKEN, session=bot_session)
+
+    try:
+        me = await bot.get_me()
+        logging.info(f"✅ Бот успешно запущен: @{me.username}")
+    except Exception as e:
+        logging.error(f"❌ Ошибка подключения: {e}")
+        return
+
+    logging.info("БОТ ЗАПУЩЕН")
+    await dp.start_polling(bot, drop_pending_updates=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
