@@ -43,6 +43,7 @@ TUTOR_NAME_MAPPING = {
     "тимк": "Тимофей Бородин",
     "викиhow": "Вика Самойленко",
     "Максим": "Макс Елдулов",
+    "PantAleks": "Дима Пантелеев",
 }
 
 def get_display_tutor_name(raw_name: str) -> str:
