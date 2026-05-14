@@ -70,6 +70,7 @@ def get_week_delete_keyboard(week_start_str: str):
             text="❌ Удалить ВСЕ платежи за эту неделю",
             callback_data=f"weekdel_confirm_{week_start_str}"
         )
+
     )
     return builder.as_markup()
 def get_delete_confirm_keyboard():

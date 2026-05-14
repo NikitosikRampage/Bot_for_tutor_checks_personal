@@ -56,6 +56,7 @@ class Payment(Base):
     tutor_name = Column(String, nullable=False)
     hours = Column(Float, nullable=False)
     tutor_rate = Column(Float, nullable=False)
+    lesson_cost = Column(Float, nullable=False)
     parent_name = Column(String, nullable=False)
     student_name = Column(String, nullable=False)
     receipt_file_id = Column(String, nullable=True)
@@ -88,6 +89,7 @@ class Template(Base):
     hours = Column(Float, nullable=False)
     parent_name = Column(String, nullable=False)
     student_name = Column(String, nullable=False)
+    lesson_cost = Column(Float, nullable=False)
     tutor_rate = Column(Float, nullable=False)
 
 class User(Base):

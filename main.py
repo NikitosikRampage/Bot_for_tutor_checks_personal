@@ -19,21 +19,10 @@ from keyboards import (
     get_pending_actions_keyboard, get_approved_actions_keyboard,
     get_week_delete_keyboard, get_delete_confirm_keyboard, get_samples_keyboard, get_broadcast_confirm_keyboard
 )
-
-
-import yadisk
-from yadisk import YaDisk
-
-
 import logging
 logging.basicConfig(level=logging.INFO)
 import yadisk
 from yadisk import YaDisk
-
-from aiohttp import ClientSession
-from aiohttp_socks import ProxyConnector
-from aiogram.client.session.aiohttp import AiohttpSession
-
 dp = Dispatcher(storage=MemoryStorage())
 
 
@@ -44,6 +33,7 @@ TUTOR_NAME_MAPPING = {
     "викиhow": "Вика Самойленко",
     "Максим": "Макс Елдулов",
     "PantAleks": "Дима Пантелеев",
+    "Андрей": "Андрей Хлимоненко",
 }
 
 def get_display_tutor_name(raw_name: str) -> str:
@@ -53,6 +43,7 @@ class PaymentForm(StatesGroup):
     waiting_for_hours = State()
     waiting_for_names = State()
     waiting_for_tutor_rate = State()
+    waiting_for_lesson_cost = State()
     waiting_for_receipt = State()
 
 
@@ -65,6 +56,7 @@ class TemplateForm(StatesGroup):
     waiting_for_hours = State()
     waiting_for_names = State()
     waiting_for_tutor_rate = State()
+    waiting_for_lesson_cost = State()
     viewing_list = State()
 
 
@@ -156,17 +148,13 @@ async def start_create_template(message: Message, state: FSMContext):
         return
     await state.set_state(TemplateForm.waiting_for_hours)
     await message.answer(
-        "Шаг 1/3 • Количество часов\nПример: 1.5  2  0.75",
+        "Шаг 1/4 • Количество часов\nПример: 1.5",
         reply_markup=get_cancel_keyboard()
     )
 
 
 @dp.message(TemplateForm.waiting_for_hours)
 async def process_template_hours(message: Message, state: FSMContext):
-    if message.text and message.text.strip() == "Отмена":
-        await state.clear()
-        await message.answer("Отменено.", reply_markup=get_samples_keyboard())
-        return
     try:
         hours = float(message.text.replace(",", "."))
         if not 0.1 <= hours <= 12:
@@ -175,7 +163,7 @@ async def process_template_hours(message: Message, state: FSMContext):
         await state.update_data(hours=hours)
         await state.set_state(TemplateForm.waiting_for_names)
         await message.answer(
-            f"Часы: {hours}\n\nШаг 2/3 • Имя родителя и имя ребёнка (через пробел)\nПример: Анна Матвей"
+            f"Часы: {hours}\n\nШаг 2/4 • Имя родителя и имя ребёнка (через пробел)\nПример: Анна Матвей"
         )
     except ValueError:
         await message.answer("Пожалуйста, введите число")
@@ -183,72 +171,85 @@ async def process_template_hours(message: Message, state: FSMContext):
 
 @dp.message(TemplateForm.waiting_for_names)
 async def process_template_names(message: Message, state: FSMContext):
-    if message.text and message.text.strip() == "Отмена":
-        await state.clear()
-        await message.answer("Отменено.", reply_markup=get_samples_keyboard())
-        return
     parts = message.text.strip().split(maxsplit=1)
     if len(parts) < 2:
         await message.answer("Введите имя родителя и имя ребёнка через пробел")
         return
-    parent_name, student_name = parts[0].strip(), (parts[1].strip() if len(parts) > 1 else "")
-    if len(parent_name) < 2 or len(student_name) < 2:
-        await message.answer("Имена слишком короткие")
-        return
+    parent_name = parts[0].strip()
+    student_name = parts[1].strip()
+
     await state.update_data(parent_name=parent_name, student_name=student_name)
     await state.set_state(TemplateForm.waiting_for_tutor_rate)
     await message.answer(
-        f"Родитель: {parent_name}\nРебёнок: {student_name}\n\nШаг 3/3 • Ваша ставка за час (руб)"
+        f"Родитель: {parent_name}\nРебёнок: {student_name}\n\n"
+        "Шаг 3/4 • Ставка репетитора за час (руб)"
     )
 
 
 @dp.message(TemplateForm.waiting_for_tutor_rate)
 async def process_template_rate(message: Message, state: FSMContext):
-    if message.text and message.text.strip() == "Отмена":
-        await state.clear()
-        await message.answer("Отменено.", reply_markup=get_samples_keyboard())
-        return
     try:
         rate = float(message.text.replace(",", "."))
         if rate <= 0:
             await message.answer("Ставка должна быть больше 0")
             return
+        await state.update_data(tutor_rate=rate)
+        await state.set_state(TemplateForm.waiting_for_lesson_cost)
+        await message.answer(
+            f"Ставка репетитора: {rate} ₽\n\n"
+            "Шаг 4/4 • Стоимость занятия для мамы (руб)"
+        )
+    except ValueError:
+        await message.answer("Введите число")
+
+@dp.message(TemplateForm.waiting_for_lesson_cost)
+async def process_template_lesson_cost(message: Message, state: FSMContext):
+    try:
+        lesson_cost = float(message.text.replace(",", "."))
+        if lesson_cost <= 0:
+            await message.answer("Стоимость занятия должна быть больше 0")
+            return
+
         data = await state.get_data()
-        display_name = f"👩‍🏫 {data['parent_name']}/{data['student_name']} | 💰{rate}₽ | ⏰{data['hours']}ч"
         tutor_id = message.from_user.id
+
+        display_name = (
+            f"👩‍🏫{data['parent_name']}/{data['student_name']} | "
+            f"💰{data['tutor_rate']}₽ | ⏰{data['hours']}ч | 💲{data['lesson_cost']}₽"
+        )
+
         session = None
         try:
             session = get_session()
-            existing = session.query(Template).filter_by(tutor_id=tutor_id, display_name=display_name).first()
-            if existing:
-                await message.answer("Шаблон с такими данными уже существует", reply_markup=get_samples_keyboard())
-                await state.clear()
-                return
             t = Template(
                 tutor_id=tutor_id,
                 display_name=display_name,
                 hours=data["hours"],
                 parent_name=data["parent_name"],
                 student_name=data["student_name"],
-                tutor_rate=rate,
+                tutor_rate=data["tutor_rate"],
+                lesson_cost=lesson_cost,          # ← важно
             )
             session.add(t)
             session.commit()
+
             await message.answer(
-                f"Шаблон успешно создан:\n{display_name}",
+                f"✅ Шаблон успешно создан!\n\n"
+                f"{display_name}",
                 reply_markup=get_samples_keyboard()
             )
         except Exception as e:
             if session:
                 session.rollback()
-            await message.answer(f"Ошибка при создании шаблона: {e}")
+            await message.answer(f"Ошибка при сохранении шаблона: {e}")
         finally:
             if session:
                 session.close()
-        await state.clear()
-    except ValueError:
-        await message.answer("Введите корректное число")
 
+        await state.clear()
+
+    except ValueError:
+        await message.answer("Введите число (например: 1500 или 2000.5)")
 
 @dp.message(F.text == "Мои шаблоны")
 async def show_my_templates(message: Message, state: FSMContext):
@@ -299,6 +300,7 @@ async def use_template(callback: CallbackQuery, state: FSMContext):
             parent_name=t.parent_name,
             student_name=t.student_name,
             tutor_rate=t.tutor_rate,
+            lesson_cost=t.lesson_cost,
         )
         await state.set_state(PaymentForm.waiting_for_receipt)
         await callback.message.answer(
@@ -374,7 +376,7 @@ async def delete_template(callback: CallbackQuery):
 async def start_add_payment(message: Message, state: FSMContext):
     await state.set_state(PaymentForm.waiting_for_hours)
     await message.answer(
-        "Шаг 1/4 • Часы\nПример: 1.5, 2, 0.75",
+        "Шаг 1/5 • Количество часов (пример: 1.5)",
         reply_markup=get_cancel_keyboard()
     )
 
@@ -383,14 +385,14 @@ async def start_add_payment(message: Message, state: FSMContext):
 async def process_hours(message: Message, state: FSMContext):
     try:
         hours = float(message.text.replace(',', '.'))
-        if not 0.1 <= hours <= 12:
-            await message.answer("От 0.1 до 12 часов")
+        if hours <= 0:
+            await message.answer("Часы должны быть больше 0")
             return
         await state.update_data(hours=hours)
         await state.set_state(PaymentForm.waiting_for_names)
         await message.answer(
             f"Часы: {hours}\n\n"
-            "Шаг 2/4 • Имя родителя и имя ребёнка (через пробел)\nПример: Анна Матвей"
+            "Шаг 2/5 • Имя мамы и имя ребёнка через пробел\nПример: Анна Матвей"
         )
     except ValueError:
         await message.answer("Введите число")
@@ -401,16 +403,17 @@ async def process_names(message: Message, state: FSMContext):
     text = message.text.strip()
     parts = text.split(maxsplit=1)
     if len(parts) < 2:
-        await message.answer("Нужны имя родителя и имя ребёнка через пробел")
+        await message.answer("Введите имя мамы и ребёнка через пробел")
         return
     parent_name = parts[0].strip()
     student_name = ' '.join(parts[1:]).strip()
-    if len(parent_name) < 2 or len(student_name) < 2:
-        await message.answer("Слишком короткое")
-        return
+
     await state.update_data(parent_name=parent_name, student_name=student_name)
     await state.set_state(PaymentForm.waiting_for_tutor_rate)
-    await message.answer(f"Родитель: {parent_name}\nРебёнок: {student_name}\n\nШаг 3/4 • Ваша ставка за занятие (руб)")
+    await message.answer(
+        f"Мама: {parent_name}\nРебёнок: {student_name}\n\n"
+        "Шаг 3/5 • Ставка репетитора за час (руб)"
+    )
 
 
 @dp.message(PaymentForm.waiting_for_tutor_rate)
@@ -418,14 +421,32 @@ async def process_tutor_rate(message: Message, state: FSMContext):
     try:
         rate = float(message.text.replace(',', '.'))
         if rate <= 0:
-            await message.answer("Ставка > 0")
+            await message.answer("Ставка должна быть больше 0")
+            return
+        await state.update_data(tutor_rate=rate)
+        await state.set_state(PaymentForm.waiting_for_lesson_cost)
+        await message.answer(
+            f"Ставка репетитора: {rate} ₽/час\n\n"
+            "Шаг 4/5 • Стоимость занятия для мамы (руб)"
+        )
+    except ValueError:
+        await message.answer("Введите число")
+
+
+@dp.message(PaymentForm.waiting_for_lesson_cost)
+async def process_lesson_cost(message: Message, state: FSMContext):
+    try:
+        lesson_cost = float(message.text.replace(',', '.'))
+        if lesson_cost <= 0:
+            await message.answer("Стоимость занятия должна быть больше 0")
             return
 
-        await state.update_data(tutor_rate=rate)
+        await state.update_data(lesson_cost=lesson_cost)
         await state.set_state(PaymentForm.waiting_for_receipt)
         await message.answer(
-            f"Ваша ставка: {rate} ₽\n\n"
-            "Шаг 4/4 • Отправьте чек"
+            f"Стоимость занятия: {lesson_cost} ₽\n\n"
+            "Шаг 5/5 • Отправьте чек (фото или PDF)",
+            reply_markup=get_cancel_keyboard()
         )
     except ValueError:
         await message.answer("Введите число")
@@ -435,20 +456,8 @@ async def process_tutor_rate(message: Message, state: FSMContext):
 async def process_receipt(message: Message, state: FSMContext):
     data = await state.get_data()
 
-    file_id = None
-    file_type = None
-    if message.document:
-        file_id = message.document.file_id
-        file_type = "document"
-    elif message.photo:
-        file_id = message.photo[-1].file_id
-        file_type = "photo"
-
-    if not file_id:
-        await message.answer("Нужен фото или документ")
-        return
-
-    week_start = get_week_start_date()
+    file_id = message.document.file_id if message.document else message.photo[-1].file_id
+    receipt_type = "document" if message.document else "photo"
 
     session = None
     try:
@@ -458,35 +467,25 @@ async def process_receipt(message: Message, state: FSMContext):
             tutor_name=message.from_user.full_name,
             hours=data['hours'],
             tutor_rate=data['tutor_rate'],
+            lesson_cost=data['lesson_cost'],
             parent_name=data['parent_name'],
             student_name=data['student_name'],
             receipt_file_id=file_id,
-            receipt_type=file_type,
-            week_start_date=week_start,
+            receipt_type=receipt_type,
+            week_start_date=get_week_start_date(),
             status='pending'
         )
         session.add(payment)
         session.commit()
 
-        pid = payment.id
-
-        await message.answer(
-            f"Платёж #{pid} добавлен и отправлен на проверку!\n\n"
-            f"Ребёнок: {data['student_name']}\n"
-            f"Родитель: {data['parent_name']}\n"
-            f"Часы: {data['hours']}\n"
-            f"Ставка: {data['tutor_rate']} ₽",
-            reply_markup=get_main_keyboard()
-        )
-
+        await message.answer(f"✅ Платёж отправлен на проверку! ID: #{payment.id}", reply_markup=get_main_keyboard())
+        await notify_admins_about_new_payment(payment.id)
         await state.clear()
 
-        await notify_admins_about_new_payment(pid)
-
     except Exception as e:
-        await message.answer(f"Ошибка: {e}")
+        await message.answer(f"Ошибка сохранения: {e}")
     finally:
-        if session is not None:
+        if session:
             session.close()
 
 
@@ -498,14 +497,16 @@ async def notify_admins_about_new_payment(payment_id: int):
         if not p:
             return
 
+
         text = (
             f"Новый платёж #{p.id}\n\n"
             f"Репетитор: {get_display_tutor_name(p.tutor_name)}\n"
-            f"Ребёнок:  {p.student_name}\n"
-            f"Родитель:      {p.parent_name}\n"
-            f"Часы:      {p.hours}\n"
-            f"Ставка:    {p.tutor_rate} ₽\n"
-            f"Дата:      {p.date.strftime('%d.%m.%Y %H:%M')}"
+            f"Ребёнок: {p.student_name}\n"
+            f"Родитель: {p.parent_name}\n"
+            f"Часы: {p.hours}\n"
+            f"Ставка: {p.tutor_rate} ₽\n"
+            f"Стоимость занятия: {p.lesson_cost} ₽\n"
+            f"Дата: {p.date.strftime('%d.%m.%Y %H:%M')}"
         )
 
         markup = get_pending_actions_keyboard(p.id)
@@ -762,6 +763,7 @@ async def show_all_payments(message: Message):
                     f"{p.parent_name}/{p.student_name}\n"
                     f"{p.hours:.2f} ч\n"
                     f"{p.tutor_rate:.0f} ₽ \n"
+                    f"{p.lesson_cost:.0f} ₽ \n"
                 )
                 lines.append(line)
 
@@ -794,7 +796,8 @@ async def show_weekly_reports(message: Message):
         tutor_payments = session.query(
             Payment.tutor_id,
             Payment.tutor_name,
-            func.sum(Payment.hours * Payment.tutor_rate).label('total_payment')
+            func.sum(Payment.hours * Payment.tutor_rate).label('total_payment'),
+            func.sum(Payment.hours * Payment.lesson_cost).label('total_mama')
         ).filter(
             Payment.status == 'approved',
             Payment.date >= datetime.datetime.combine(week_start, datetime.time.min),
@@ -808,22 +811,17 @@ async def show_weekly_reports(message: Message):
         response = f"<b>📊 Отчёт за неделю {week_start:%d.%m.%Y} – {week_end:%d.%m.%Y}</b>\n\n"
 
         total_week = 0.0
-        for tutor_id, tutor_name, total_payment in tutor_payments:
+        total_mama_all = 0.0
+        for tutor_id, tutor_name, total_payment, mama_sum in tutor_payments:
             display_name = get_display_tutor_name(tutor_name)
-            response += f"Репетитор: {display_name}\n<b>К выплате: {total_payment:,.2f} ₽</b>\n\n"
+            response += f"Репетитор: {display_name}\n<b>К выплате: {total_payment:,.2f} ₽</b>\n"
+            response += f"<i>Денег с репетитора пришло: {mama_sum:,.2f} ₽</i>\n\n"
             total_week += total_payment
+            total_mama_all += mama_sum
 
-        response += f"<b>Всего к выплате за неделю: {total_week:,.2f} ₽</b>\n\n"
-
-        response += (
-            "<b>💳 Реквизиты для выплат репетиторам</b>\n"
-            "\n"
-            "Дмитрий Юрьевич Б.     Т-Банк          79234141939\n"
-            "Святослав Денисович К.  Сбербанк        79234086564\n"
-            "Тимофей Бородин         Сбербанк        2202205387704015\n"
-            "Елдудулов Максим А.     Сбербанк        79234361676\n"
-            "Виктория Александровна С. Сбербанк      79613314053\n"
-        )
+        total_mama_all -= total_week
+        response += f"<b>Всего к выплате за неделю: {total_week:,.2f} ₽</b>\n"
+        response += f"💳Прибыль: <i>{total_mama_all:,.0f} ₽</i>\n\n"
 
         await message.answer(
             response,
@@ -1134,7 +1132,7 @@ async def find_payment(message: Message):
 async def main():
     global bot
 
-    PROXY_URL = "socks5://appAgG:Xok0nq@45.133.220.218:8000"
+    PROXY_URL = "socks5://UTyVuY:1CasdP@64.226.54.12:8000"
 
     from aiogram import Bot
     from aiogram.client.session.aiohttp import AiohttpSession
