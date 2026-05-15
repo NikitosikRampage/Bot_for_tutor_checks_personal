@@ -215,7 +215,7 @@ async def process_template_lesson_cost(message: Message, state: FSMContext):
 
         display_name = (
             f"👩‍🏫{data['parent_name']}/{data['student_name']} | "
-            f"💰{data['tutor_rate']}₽ | ⏰{data['hours']}ч | 💲{data['lesson_cost']}₽"
+            f"💰{data['tutor_rate']}₽ | ⏰{data['hours']}ч | 💲{lesson_cost}₽"
         )
 
         session = None
