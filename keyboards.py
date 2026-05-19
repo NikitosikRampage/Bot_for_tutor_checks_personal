@@ -80,14 +80,6 @@ def get_week_delete_keyboard(week_start_str: str):
             callback_data="weekdel_lastweek"
         )
     )
-
-    builder.row(
-        InlineKeyboardButton(
-            text="Отмена",
-            callback_data="cancel_week_delete"
-        )
-    )
-
     return builder.as_markup()
 
 

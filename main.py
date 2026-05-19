@@ -1101,34 +1101,44 @@ async def process_delete_confirm(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    if text in ["да", "да удалить", "да, удалить", "yes"]:
+    if text in ["да", "да удалить", "да, удалить", "yes", "подтверждаю"]:
         data = await state.get_data()
         session = None
         try:
             session = get_session()
-            if data.get("action") == "weekdel_confirm_":
-                ws = data["week_start"]
-                we = ws + timedelta(days=6)
+            week_start = data.get("week_start")
 
-                count = session.query(Payment).filter(
-                    Payment.date >= datetime.datetime.combine(ws, datetime.time.min),
-                    Payment.date <= datetime.datetime.combine(we, datetime.time.max)
-                ).delete(synchronize_session=False)
+            if not week_start:
+                await message.answer("Ошибка: период не найден")
+                await state.clear()
+                return
 
-                session.commit()
-                await message.answer(
-                    f"Удалено {count} платежей за неделю.",
-                    reply_markup=get_admin_keyboard()
-                )
+            week_end = week_start + timedelta(days=6)
+
+            count = session.query(Payment).filter(
+                Payment.date >= datetime.datetime.combine(week_start, datetime.time.min),
+                Payment.date <= datetime.datetime.combine(week_end, datetime.time.max)
+            ).delete(synchronize_session=False)
+
+            session.commit()
+
+            await message.answer(
+                f"✅ Успешно удалено <b>{count}</b> платежей\n"
+                f"за период {week_start:%d.%m.%Y} — {week_end:%d.%m.%Y}",
+                parse_mode="HTML",
+                reply_markup=get_admin_keyboard()
+            )
+
         except Exception as e:
-            await message.answer(f"Ошибка удаления: {str(e)}")
+            await message.answer(f"Ошибка при удалении: {str(e)}")
         finally:
             if session is not None:
                 session.close()
             await state.clear()
+
     else:
         await message.answer(
-            "Пожалуйста, нажмите «Да, удалить» или «Отмена», или напишите «да» / «отмена».",
+            "Пожалуйста, нажмите «Да, удалить» или напишите «да» / «отмена».",
             reply_markup=get_delete_confirm_keyboard()
         )
 

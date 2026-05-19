@@ -45,7 +45,6 @@ for table_name, model in tables:
 
     print(f"📋 Перенос таблицы: {table_name}")
 
-    # Получаем общие колонки
     old_cols = {col["name"] for col in insp_old.get_columns(table_name)}
     new_cols = {col["name"] for col in insp_new.get_columns(table_name)}
     common_cols = old_cols & new_cols
