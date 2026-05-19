@@ -29,6 +29,7 @@ def get_samples_keyboard():
         resize_keyboard=True
     )
 
+
 def get_cancel_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Отмена")]],
@@ -46,11 +47,12 @@ def get_admin_keyboard():
         resize_keyboard=True
     )
 
+
 def get_pending_actions_keyboard(payment_id: int):
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="Подтвердить", callback_data=f"approve_{payment_id}"),
-        InlineKeyboardButton(text="Отклонить",   callback_data=f"reject_{payment_id}"),
+        InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"approve_{payment_id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{payment_id}"),
     )
     return builder.as_markup()
 
@@ -58,32 +60,47 @@ def get_pending_actions_keyboard(payment_id: int):
 def get_approved_actions_keyboard(payment_id: int):
     builder = InlineKeyboardBuilder()
     builder.add(
-        InlineKeyboardButton(text="Удалить", callback_data=f"delete_{payment_id}")
+        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_{payment_id}")
     )
     return builder.as_markup()
 
 
 def get_week_delete_keyboard(week_start_str: str):
     builder = InlineKeyboardBuilder()
-    builder.add(
+
+    builder.row(
         InlineKeyboardButton(
-            text="❌ Удалить ВСЕ платежи за эту неделю",
+            text="🗑 Удалить за ЭТУ неделю",
             callback_data=f"weekdel_confirm_{week_start_str}"
         )
-
     )
+    builder.row(
+        InlineKeyboardButton(
+            text="🗑 Удалить за ПРОШЛУЮ неделю",
+            callback_data="weekdel_lastweek"
+        )
+    )
+
+    builder.row(
+        InlineKeyboardButton(
+            text="Отмена",
+            callback_data="cancel_week_delete"
+        )
+    )
+
     return builder.as_markup()
+
+
 def get_delete_confirm_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [
-                KeyboardButton(text="Да, удалить"),
-                KeyboardButton(text="Отмена")
-            ]
+            [KeyboardButton(text="Да, удалить")],
+            [KeyboardButton(text="Отмена")]
         ],
         resize_keyboard=True,
         one_time_keyboard=True
     )
+
 
 def get_broadcast_confirm_keyboard():
     return ReplyKeyboardMarkup(

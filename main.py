@@ -27,17 +27,28 @@ dp = Dispatcher(storage=MemoryStorage())
 
 
 TUTOR_NAME_MAPPING = {
-    "qq": "Дмитрий Баев",
-    "Слава": "Святослав Кочмарев",
-    "тимк": "Тимофей Бородин",
-    "викиhow": "Вика Самойленко",
-    "Максим": "Макс Елдулов",
-    "PantAleks": "Дима Пантелеев",
-    "Андрей": "Андрей Хлимоненко",
+    "qq": "Дмитрий Баев",               # Б
+    "тимк": "Тимофей Бородин",          # Б
+    "илья": "Илья Герасименко",         # Г
+    "Максим": "Максим Елдулов",         # Е
+    "Слава": "Святослав Кочмарев",      # К
+    "PantAleks": "Дмитрий Пантелеев",   # П
+    "Hidden": "Дмитрий Пантелеев",      # П
+    ".": "Дмитрий Пантелеев",           # П
+    "викиhow": "Виктория Самойленко",   # С
+    "Андрей": "Андрей Хлимоненко"       # Х
 }
+
 
 def get_display_tutor_name(raw_name: str) -> str:
     return TUTOR_NAME_MAPPING.get(raw_name.strip(), raw_name.strip())
+
+
+def sort_by_surname(tutor_list):
+    def get_surname(name):
+        return name.split()[-1] if name.split() else name
+    return sorted(tutor_list, key=lambda x: get_surname(x))
+
 
 class PaymentForm(StatesGroup):
     waiting_for_hours = State()
@@ -808,11 +819,19 @@ async def show_weekly_reports(message: Message):
             await message.answer(f"За неделю {week_start:%d.%m.%Y} – {week_end:%d.%m.%Y} данных нет")
             return
 
+        def get_surname(full_name: str) -> str:
+            parts = full_name.strip().split()
+            return parts[-1] if parts else full_name
+        sorted_tutors = sorted(
+            tutor_payments,
+            key=lambda x: get_surname(get_display_tutor_name(x[1]))
+        )
+
         response = f"<b>📊 Отчёт за неделю {week_start:%d.%m.%Y} – {week_end:%d.%m.%Y}</b>\n\n"
 
         total_week = 0.0
         total_mama_all = 0.0
-        for tutor_id, tutor_name, total_payment, mama_sum in tutor_payments:
+        for tutor_id, tutor_name, total_payment, mama_sum in sorted_tutors:
             display_name = get_display_tutor_name(tutor_name)
             response += f"Репетитор: {display_name}\n<b>К выплате: {total_payment:,.2f} ₽</b>\n"
             response += f"<i>Денег с репетитора пришло: {mama_sum:,.2f} ₽</i>\n\n"
@@ -1042,6 +1061,36 @@ async def start_delete_week(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
     except Exception as e:
         await callback.answer(f"Ошибка: {str(e)}", show_alert=True)
+
+@dp.callback_query(F.data == "weekdel_lastweek")
+async def start_delete_last_week(callback: CallbackQuery, state: FSMContext):
+    if not Config.is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    try:
+        today = datetime.datetime.now().date()
+        last_week_start = today - timedelta(days=today.weekday() + 7)
+        last_week_end = last_week_start + timedelta(days=6)
+
+        await state.set_state(AdminForm.waiting_for_delete_confirm)
+        await state.update_data(
+            week_start=last_week_start,
+            action="weekdel_lastweek"
+        )
+
+        await callback.message.answer(
+            f"⚠️ Вы уверены, что хотите удалить !!!ВСЕ!!! платежи\n"
+            f"за <b>прошлую неделю</b>?\n\n"
+            f"Период: {last_week_start:%d.%m.%Y} — {last_week_end:%d.%m.%Y}\n\n"
+            f"Это действие нельзя отменить!",
+            parse_mode="HTML",
+            reply_markup=get_delete_confirm_keyboard()
+        )
+        await callback.answer()
+
+    except Exception as e:
+        await callback.answer(f"Ошибка: {e}", show_alert=True)
 
 @dp.message(AdminForm.waiting_for_delete_confirm)
 async def process_delete_confirm(message: Message, state: FSMContext):
